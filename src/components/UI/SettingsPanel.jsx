@@ -1,7 +1,8 @@
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAtlasStore } from '../../store/atlasStore'
 import { QUALITY_TIERS, TIER_NAMES } from '../../config/qualityTiers'
+import AlertRulesPanel from './AlertRulesPanel'
 
 const GLOBE_MODES = [
     { id: 'cesium', label: 'Cesium', desc: '3D globe with terrain & close-up detail' },
@@ -38,7 +39,12 @@ export default function SettingsPanel() {
     const qualityOverrides = useAtlasStore((s) => s.qualityOverrides)
     const setQualityOverride = useAtlasStore((s) => s.setQualityOverride)
     const clearQualityOverrides = useAtlasStore((s) => s.clearQualityOverrides)
+    const colorblindMode = useAtlasStore((s) => s.colorblindMode)
+    const toggleColorblindMode = useAtlasStore((s) => s.toggleColorblindMode)
+    const user = useAtlasStore((s) => s.user)
+    const signOut = useAtlasStore((s) => s.signOut)
     const panelRef = useRef(null)
+    const [alertsOpen, setAlertsOpen] = useState(false)
 
     // Close on click outside
     useEffect(() => {
@@ -64,6 +70,7 @@ export default function SettingsPanel() {
     const isCesium = globeMode === 'cesium'
 
     return (
+    <>
         <AnimatePresence>
             {settingsOpen && (
                 <motion.div
@@ -133,6 +140,72 @@ export default function SettingsPanel() {
                         </div>
                     )}
 
+                    {/* ── Accessibility ── */}
+                    <div className="settings-section">
+                        <div className="settings-section-label">Accessibility</div>
+                        <div className="settings-toggles">
+                            <button
+                                onClick={toggleColorblindMode}
+                                className={`settings-feature-row ${colorblindMode ? 'on' : 'off'}`}
+                            >
+                                <span className="settings-feature-icon">◐</span>
+                                <span className="settings-feature-label">Colorblind Patterns</span>
+                                <span className={`settings-feature-switch ${colorblindMode ? 'on' : ''}`}>
+                                    <span className="settings-feature-knob" />
+                                </span>
+                            </button>
+                        </div>
+                        <div className="settings-hint">
+                            ESC clears selection and restores HUD · Tab cycles events · F toggles HUD
+                        </div>
+                    </div>
+
+                    {/* ── Alerts (signed-in only) ── */}
+                    {user && (
+                        <div className="settings-section">
+                            <div className="settings-section-label">Alerts</div>
+                            <div className="settings-toggles">
+                                <button
+                                    onClick={() => setAlertsOpen(true)}
+                                    className="settings-feature-row on"
+                                >
+                                    <span className="settings-feature-icon">🔔</span>
+                                    <span className="settings-feature-label">Configure Alert Rules</span>
+                                    <span className="text-[9px] text-white/25">→</span>
+                                </button>
+                            </div>
+                            <div className="settings-hint">
+                                Get notified by email or SMS when events match your criteria
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ── Account ── */}
+                    <div className="settings-section">
+                        <div className="settings-section-label">Account</div>
+                        <div className="settings-toggles">
+                            {user ? (
+                                <>
+                                    <div className="settings-feature-row on">
+                                        <span className="settings-feature-icon">●</span>
+                                        <span className="settings-feature-label" style={{ fontSize: '8px', letterSpacing: '0.15em' }}>
+                                            {user.email}
+                                        </span>
+                                    </div>
+                                    <button onClick={signOut} className="settings-feature-row off">
+                                        <span className="settings-feature-icon">↩</span>
+                                        <span className="settings-feature-label">Sign Out</span>
+                                    </button>
+                                </>
+                            ) : (
+                                <div className="settings-feature-row off">
+                                    <span className="settings-feature-icon">○</span>
+                                    <span className="settings-feature-label">Guest — sign in to sync preferences</span>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
                     {/* ── Individual Toggles (Cesium only) ── */}
                     {isCesium && (
                         <div className="settings-section">
@@ -171,5 +244,7 @@ export default function SettingsPanel() {
                 </motion.div>
             )}
         </AnimatePresence>
+        <AlertRulesPanel open={alertsOpen} onClose={() => setAlertsOpen(false)} />
+    </>
     )
 }

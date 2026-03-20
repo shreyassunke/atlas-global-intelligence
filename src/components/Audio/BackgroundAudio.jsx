@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { useAtlasStore } from '../../store/atlasStore'
 
 const INTRO_URL = '/audio/intro.mp3'
 const SPACE_AMBIENT_URL = '/audio/space-ambient.mp3'
@@ -8,6 +9,30 @@ export default function BackgroundAudio() {
   const introRef = useRef(null)
   const ambientRef = useRef(null)
   const hasStartedRef = useRef(false)
+  /** When YouTube in-app player is open, pause BGM so only one source plays */
+  const youtubeEmbed = useAtlasStore((s) => s.youtubeEmbed)
+  const bgmSuppressed = !!youtubeEmbed
+
+  // Pause / resume BGM when YouTube overlay opens or closes (exclusive audio)
+  useEffect(() => {
+    const intro = introRef.current
+    const ambient = ambientRef.current
+    if (!intro || !ambient) return
+
+    if (bgmSuppressed) {
+      intro.pause()
+      ambient.pause()
+      return
+    }
+
+    if (!hasStartedRef.current) return
+
+    if (!intro.ended) {
+      intro.play().catch(() => {})
+    } else {
+      ambient.play().catch(() => {})
+    }
+  }, [bgmSuppressed])
 
   // Start on first user interaction (browser autoplay policy)
   useEffect(() => {
@@ -25,6 +50,7 @@ export default function BackgroundAudio() {
 
       // Fallback: if ambient ever ends (browser quirk), restart immediately
       ambient.addEventListener('ended', function onAmbientEnded() {
+        if (useAtlasStore.getState().youtubeEmbed) return
         ambient.play().catch(() => {})
       })
 
@@ -33,6 +59,7 @@ export default function BackgroundAudio() {
       })
 
       intro.addEventListener('ended', () => {
+        if (useAtlasStore.getState().youtubeEmbed) return
         ambient.play().catch(() => {})
       })
     }

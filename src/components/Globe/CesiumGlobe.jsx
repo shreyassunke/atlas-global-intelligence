@@ -5,8 +5,10 @@ import 'cesium/Build/Cesium/Widgets/widgets.css'
 import { useAtlasStore } from '../../store/atlasStore'
 import { CATEGORIES, getCategoryColor } from '../../utils/categoryColors'
 import { getRegionKey, getTimezoneViewCenter } from '../../utils/geo'
-import { MOCK_NEWS } from '../../utils/mockData'
 import { QUALITY_TIERS, detectQualityTier } from '../../config/qualityTiers'
+import { TIER_COLORS, SEVERITY_SIZES } from '../../core/eventSchema'
+import { generateSprite, getAnimationState, getSeveritySize } from '../../core/visualGrammar'
+import { MARITIME_CHOKEPOINTS, NUCLEAR_FACILITIES, SUBMARINE_CABLE_PATHS, clusterEvents } from '../../core/globeLayers'
 
 // Cesium ion token from .env — used for World Imagery, World Terrain, Black Marble (3812), Photorealistic 3D Tiles
 const ION_TOKEN = import.meta.env.VITE_CESIUM_ION_TOKEN || ''
@@ -21,6 +23,91 @@ const DOT_SIZE_MAX = 9.0
 const DOT_ALPHA_MIN = 0.35
 const DOT_ALPHA_MAX = 0.75
 
+/**
+ * Cesium billboards anchored at lat/lng must depth-test against the globe.
+ * - `0` = always depth-test → back-side markers are hidden (correct).
+ * - `Number.POSITIVE_INFINITY` = never depth-test → markers draw through Earth (“hollow Earth”).
+ * Use this for ALL globe markers (news, events, entities). Do not switch to POSITIVE_INFINITY
+ * to “fix” terrain clipping — raise altitude or adjust terrain instead.
+ * @see https://cesium.com/learn/cesiumjs/ref-doc/Billboard.html#disableDepthTestDistance
+ */
+const GLOBE_BILLBOARD_DISABLE_DEPTH_TEST_DISTANCE = 0
+
+// Billboard sprite sizes for news markers (article vs video distinction)
+const NEWS_SPRITE_SIZE = 48
+const NEWS_MARKER_PX = 20
+const _newsSpriteCache = new Map()
+
+function makeNewsSpriteKey(cssColor, isVideo) {
+  return `${cssColor}_${isVideo ? 'v' : 'a'}`
+}
+
+function generateNewsSprite(cssColor, isVideo) {
+  const key = makeNewsSpriteKey(cssColor, isVideo)
+  if (_newsSpriteCache.has(key)) return _newsSpriteCache.get(key)
+  const s = NEWS_SPRITE_SIZE
+  const h = s / 2
+  const c = document.createElement('canvas')
+  c.width = s
+  c.height = s
+  const ctx = c.getContext('2d')
+
+  if (isVideo) {
+    // Rounded-rect play button (avoid ctx.roundRect — not in all browsers)
+    const r = h - 4
+    const rx = h - r
+    const ry = h - r * 0.75
+    const rw = r * 2
+    const rh = r * 1.5
+    const rad = 4
+    ctx.beginPath()
+    ctx.moveTo(rx + rad, ry)
+    ctx.lineTo(rx + rw - rad, ry)
+    ctx.quadraticCurveTo(rx + rw, ry, rx + rw, ry + rad)
+    ctx.lineTo(rx + rw, ry + rh - rad)
+    ctx.quadraticCurveTo(rx + rw, ry + rh, rx + rw - rad, ry + rh)
+    ctx.lineTo(rx + rad, ry + rh)
+    ctx.quadraticCurveTo(rx, ry + rh, rx, ry + rh - rad)
+    ctx.lineTo(rx, ry + rad)
+    ctx.quadraticCurveTo(rx, ry, rx + rad, ry)
+    ctx.closePath()
+    ctx.fillStyle = cssColor
+    ctx.globalAlpha = 0.85
+    ctx.fill()
+    ctx.globalAlpha = 1
+    // play triangle
+    const triH = r * 0.6
+    ctx.beginPath()
+    ctx.moveTo(h - triH * 0.35, h - triH * 0.5)
+    ctx.lineTo(h + triH * 0.55, h)
+    ctx.lineTo(h - triH * 0.35, h + triH * 0.5)
+    ctx.closePath()
+    ctx.fillStyle = '#fff'
+    ctx.fill()
+  } else {
+    // Circle with tiny "article lines" icon
+    ctx.beginPath()
+    ctx.arc(h, h, h - 4, 0, Math.PI * 2)
+    ctx.fillStyle = cssColor
+    ctx.globalAlpha = 0.8
+    ctx.fill()
+    ctx.globalAlpha = 1
+    // three horizontal lines (article glyph)
+    ctx.strokeStyle = '#fff'
+    ctx.lineWidth = 1.6
+    ctx.lineCap = 'round'
+    for (let i = -1; i <= 1; i++) {
+      const y = h + i * 4.5
+      ctx.beginPath()
+      ctx.moveTo(h - 7, y)
+      ctx.lineTo(h + 7, y)
+      ctx.stroke()
+    }
+  }
+  _newsSpriteCache.set(key, c)
+  return c
+}
+
 // Throttle intervals (ms) for expensive per-frame work
 const VISIBILITY_THROTTLE_MS = 150
 const PULSE_THROTTLE_MS = 50
@@ -32,24 +119,66 @@ function pointInRectangle(lat, lng, rect) {
   return lngRad >= rect.west && lngRad <= rect.east && latRad >= rect.south && latRad <= rect.north
 }
 
+function getNewsContentSignature(items) {
+  if (!items?.length) return '0'
+  const ids = items.map((i) => String(i.id)).sort()
+  return `${items.length}:${ids.join('|')}`
+}
+
+function getActiveCategoriesSignature(activeCategories) {
+  return [...activeCategories].sort().join(',')
+}
+
+function convexHull(points) {
+  if (points.length < 3) return points
+  const sorted = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1])
+  const cross = (O, A, B) => (A[0] - O[0]) * (B[1] - O[1]) - (A[1] - O[1]) * (B[0] - O[0])
+  const lower = []
+  for (const p of sorted) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop()
+    lower.push(p)
+  }
+  const upper = []
+  for (const p of sorted.reverse()) {
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop()
+    upper.push(p)
+  }
+  return [...lower.slice(0, -1), ...upper.slice(0, -1)]
+}
+
 export default function CesiumGlobe({ onGlobeReady }) {
   const containerRef = useRef(null)
   const viewerRef = useRef(null)
-  const autoRotate = useRef(true)
+  /** Mirrors Settings → Features → Auto-Rotate (quality tier + overrides) */
+  const effectiveAutoRotateRef = useRef(false)
+  /** When true, idle timeout has passed since last interaction — may spin if setting is on */
+  const idleSpinGateRef = useRef(false)
   const idleTimer = useRef(null)
   const onGlobeReadyRef = useRef(onGlobeReady)
   onGlobeReadyRef.current = onGlobeReady
 
-  // PointPrimitiveCollection refs (replaces individual entities)
+  // BillboardCollection refs for news markers (article / video distinction)
   const pointCollectionRef = useRef(null)
-  const pointMapRef = useRef(new Map()) // id -> { point, item }
-  const allItemsRef = useRef([])        // for visibility logic
+  const pointMapRef = useRef(new Map()) // id -> { billboard, item, baseColor }
+  /** Content signature of `newsItems` (ids) — stable even if the store reuses the same array reference */
+  const lastNewsContentSigRef = useRef('')
+  const lastActiveCategoriesSigRef = useRef('')
+  const allItemsRef = useRef([]) // filtered snapshot from last rebuildMarkers (debug / legacy)
+
+  // BillboardCollection refs (event markers — v4 visual grammar)
+  const eventBillboardsRef = useRef(null)
+  const eventBillboardMapRef = useRef(new Map()) // id -> { billboard, event }
+  const spriteCacheRef = useRef(new Map())
 
   const setZoomLevel = useAtlasStore((s) => s.setZoomLevel)
   const setSelectedMarker = useAtlasStore((s) => s.setSelectedMarker)
+  const setSelectedEvent = useAtlasStore((s) => s.setSelectedEvent)
   const setHoveredMarker = useAtlasStore((s) => s.setHoveredMarker)
   const newsItems = useAtlasStore((s) => s.newsItems)
+  const events = useAtlasStore((s) => s.events)
   const activeCategories = useAtlasStore((s) => s.activeCategories)
+  const activeDomains = useAtlasStore((s) => s.activeDomains)
+  const severityFloor = useAtlasStore((s) => s.severityFloor)
   const openStreetView = useAtlasStore((s) => s.openStreetView)
 
   // Quality tier state
@@ -81,15 +210,13 @@ export default function CesiumGlobe({ onGlobeReady }) {
   }
 
   function rebuildMarkers(viewer, items) {
-    // Clear existing collection
     if (pointCollectionRef.current) {
       viewer.scene.primitives.remove(pointCollectionRef.current)
     }
     pointMapRef.current.clear()
     allItemsRef.current = items
 
-    // Create new PointPrimitiveCollection for all markers at once
-    const collection = new Cesium.PointPrimitiveCollection()
+    const collection = new Cesium.BillboardCollection({ scene: viewer.scene })
     const altitude = 15_000
 
     for (const item of items) {
@@ -97,16 +224,23 @@ export default function CesiumGlobe({ onGlobeReady }) {
 
       const cssColor = getCategoryColor(item.category)
       const baseColor = toCesiumColor(cssColor)
+      const isVideo = item.mediaType === 'video'
+      const sprite = generateNewsSprite(cssColor, isVideo)
 
-      const point = collection.add({
+      const billboard = collection.add({
         position: Cesium.Cartesian3.fromDegrees(item.lng, item.lat, altitude),
-        pixelSize: DOT_SIZE_MIN,
-        color: baseColor.withAlpha(DOT_ALPHA_MIN),
+        image: sprite,
+        width: NEWS_MARKER_PX,
+        height: NEWS_MARKER_PX,
+        color: Cesium.Color.WHITE.withAlpha(DOT_ALPHA_MIN),
         show: true,
-        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(400_000, 35_000_000),
+        verticalOrigin: Cesium.VerticalOrigin.CENTER,
+        horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+        disableDepthTestDistance: GLOBE_BILLBOARD_DISABLE_DEPTH_TEST_DISTANCE,
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 35_000_000),
       })
 
-      pointMapRef.current.set(item.id, { point, item, baseColor })
+      pointMapRef.current.set(item.id, { billboard, item, baseColor })
     }
 
     viewer.scene.primitives.add(collection)
@@ -139,8 +273,8 @@ export default function CesiumGlobe({ onGlobeReady }) {
           .slice(0, MAX_PER_REGION_ZOOMED_OUT)
           .forEach((item) => topIds.add(item.id))
       }
-      for (const [id, { point }] of map) {
-        point.show = topIds.has(id)
+      for (const [id, { billboard }] of map) {
+        billboard.show = topIds.has(id)
       }
     } else {
       let viewRect = null
@@ -150,10 +284,56 @@ export default function CesiumGlobe({ onGlobeReady }) {
         viewRect = null
       }
       const inView = viewRect != null
-      for (const { point, item } of map.values()) {
-        point.show = inView ? pointInRectangle(item.lat, item.lng, viewRect) : true
+      for (const { billboard, item } of map.values()) {
+        billboard.show = inView ? pointInRectangle(item.lat, item.lng, viewRect) : true
       }
     }
+  }
+
+  function getSprite(shape, tier, domain) {
+    const key = `${shape}_${tier}_${domain}`
+    if (spriteCacheRef.current.has(key)) return spriteCacheRef.current.get(key)
+    const canvas = generateSprite(shape, tier, domain, 64)
+    spriteCacheRef.current.set(key, canvas)
+    return canvas
+  }
+
+  function rebuildEventMarkers(viewer, eventList) {
+    if (!viewer || viewer.isDestroyed()) return
+
+    if (eventBillboardsRef.current) {
+      viewer.scene.primitives.remove(eventBillboardsRef.current)
+    }
+    eventBillboardMapRef.current.clear()
+
+    const billboards = new Cesium.BillboardCollection({ scene: viewer.scene })
+    // Markers should read as projected onto the globe surface.
+    const altitude = 2_000
+
+    for (const evt of eventList) {
+      if (evt.lat == null || evt.lng == null) continue
+      if (!activeDomains.has(evt.domain)) continue
+      if (evt.severity < severityFloor) continue
+
+      const sprite = getSprite(evt.shape, evt.tier, evt.domain)
+      const size = getSeveritySize(evt.severity)
+
+      const billboard = billboards.add({
+        image: sprite,
+        position: Cesium.Cartesian3.fromDegrees(evt.lng, evt.lat, altitude),
+        width: size,
+        height: size,
+        color: Cesium.Color.WHITE.withAlpha(evt.opacity),
+        disableDepthTestDistance: GLOBE_BILLBOARD_DISABLE_DEPTH_TEST_DISTANCE,
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(400_000, 35_000_000),
+      })
+
+      eventBillboardMapRef.current.set(evt.id, { billboard, event: evt, baseSize: size })
+    }
+
+    viewer.scene.primitives.add(billboards)
+    eventBillboardsRef.current = billboards
+    viewer.scene.requestRender()
   }
 
   useEffect(() => {
@@ -200,6 +380,13 @@ export default function CesiumGlobe({ onGlobeReady }) {
         return
       }
       viewerRef.current = viewer
+
+      // Auto-rotate: respect Settings → Auto-Rotate (not a hard-coded default)
+      {
+        const ar = useAtlasStore.getState().getEffectiveSetting('autoRotate')
+        effectiveAutoRotateRef.current = ar
+        idleSpinGateRef.current = ar
+      }
 
       // Sync clock to current time so sun/terminator match real world (and Mission Time)
       viewer.clock.currentTime = Cesium.JulianDate.now()
@@ -258,7 +445,8 @@ export default function CesiumGlobe({ onGlobeReady }) {
 
       globe.enableLighting = true
       globe.showGroundAtmosphere = true
-      globe.depthTestAgainstTerrain = false
+      // Ensure globe occlusion works for markers/labels.
+      globe.depthTestAgainstTerrain = true
       globe.backFaceCulling = true
 
       // Softer limb: lower intensity and scale heights for gradual fade into space (globe.gl-style)
@@ -482,6 +670,99 @@ export default function CesiumGlobe({ onGlobeReady }) {
       }
 
       // ---------------------------------------------------------------
+      //  Permanent globe layers (v4.0)
+      // ---------------------------------------------------------------
+      const loadPermanentLayers = () => {
+        if (destroyed) return
+
+        // Maritime chokepoints — white diamond markers, always visible
+        for (const cp of MARITIME_CHOKEPOINTS) {
+          viewer.entities.add({
+            position: Cesium.Cartesian3.fromDegrees(cp.lng, cp.lat, 0),
+            billboard: {
+              image: (() => {
+                const c = document.createElement('canvas')
+                c.width = 24; c.height = 24
+                const ctx = c.getContext('2d')
+                ctx.translate(12, 12); ctx.rotate(Math.PI / 4)
+                ctx.fillStyle = 'rgba(255,255,255,0.8)'
+                ctx.fillRect(-6, -6, 12, 12)
+                ctx.strokeStyle = 'rgba(255,255,255,0.4)'
+                ctx.lineWidth = 1; ctx.strokeRect(-6, -6, 12, 12)
+                return c
+              })(),
+              width: 14, height: 14,
+              disableDepthTestDistance: GLOBE_BILLBOARD_DISABLE_DEPTH_TEST_DISTANCE,
+            },
+            label: {
+              text: cp.name.toUpperCase(),
+              font: '9px JetBrains Mono',
+              fillColor: Cesium.Color.WHITE.withAlpha(0.5),
+              outlineColor: Cesium.Color.BLACK.withAlpha(0.8),
+              outlineWidth: 2,
+              style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+              pixelOffset: new Cesium.Cartesian2(0, -14),
+              disableDepthTestDistance: GLOBE_BILLBOARD_DISABLE_DEPTH_TEST_DISTANCE,
+              distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 20_000_000),
+            },
+          })
+        }
+
+        // Nuclear facility markers — dim crimson icons
+        for (const nf of NUCLEAR_FACILITIES) {
+          viewer.entities.add({
+            position: Cesium.Cartesian3.fromDegrees(nf.lng, nf.lat, 0),
+            billboard: {
+              image: (() => {
+                const c = document.createElement('canvas')
+                c.width = 20; c.height = 20
+                const ctx = c.getContext('2d')
+                ctx.beginPath()
+                ctx.arc(10, 10, 6, 0, Math.PI * 2)
+                ctx.fillStyle = 'rgba(220, 50, 50, 0.25)'
+                ctx.fill()
+                ctx.strokeStyle = 'rgba(220, 50, 50, 0.4)'
+                ctx.lineWidth = 1; ctx.stroke()
+                ctx.fillStyle = 'rgba(220, 50, 50, 0.4)'
+                ctx.font = '8px sans-serif'
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+                ctx.fillText('☢', 10, 10)
+                return c
+              })(),
+              width: 12, height: 12,
+              color: Cesium.Color.WHITE.withAlpha(0.25),
+              disableDepthTestDistance: GLOBE_BILLBOARD_DISABLE_DEPTH_TEST_DISTANCE,
+              distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 15_000_000),
+            },
+          })
+        }
+
+        // Submarine cable routes — dim teal polylines
+        for (const cable of SUBMARINE_CABLE_PATHS) {
+          const positions = cable.points.flatMap(([lng, lat]) => [lng, lat])
+          viewer.entities.add({
+            polyline: {
+              positions: Cesium.Cartesian3.fromDegreesArray(positions),
+              width: 1,
+              material: new Cesium.ColorMaterialProperty(
+                Cesium.Color.fromCssColorString('#00cfff').withAlpha(0.12)
+              ),
+              clampToGround: true,
+              distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 25_000_000),
+            },
+          })
+        }
+
+        scene.requestRender()
+      }
+
+      if (typeof requestIdleCallback === 'function') {
+        requestIdleCallback(loadPermanentLayers)
+      } else {
+        setTimeout(loadPermanentLayers, 5000)
+      }
+
+      // ---------------------------------------------------------------
       //  Camera constraints
       // ---------------------------------------------------------------
       const ssc = scene.screenSpaceCameraController
@@ -580,16 +861,39 @@ export default function CesiumGlobe({ onGlobeReady }) {
           const size = DOT_SIZE_MIN + pulseT * (DOT_SIZE_MAX - DOT_SIZE_MIN)
           const alpha = DOT_ALPHA_MIN + pulseT * (DOT_ALPHA_MAX - DOT_ALPHA_MIN)
 
-          for (const { point, baseColor } of pointMapRef.current.values()) {
-            if (point.show) {
-              point.pixelSize = size
-              point.color = baseColor.withAlpha(alpha)
+          for (const { billboard } of pointMapRef.current.values()) {
+            if (billboard.show) {
+              const s = NEWS_MARKER_PX * (size / DOT_SIZE_MIN)
+              billboard.width = s
+              billboard.height = s
+              billboard.color = Cesium.Color.WHITE.withAlpha(alpha)
             }
+          }
+
+          // Event billboard pulse
+          const fastPulse = 0.5 + 0.5 * Math.sin(seconds * Math.PI * 2)
+          const slowPulse = 0.5 + 0.5 * Math.sin(seconds * Math.PI * 0.5)
+          let animatedCount = 0
+          const MAX_ANIMATED = 20
+          for (const { billboard, event, baseSize } of eventBillboardMapRef.current.values()) {
+            if (!billboard.show) continue
+            const anim = getAnimationState(event.timestamp)
+            if (anim === 'static') continue
+            if (animatedCount >= MAX_ANIMATED) continue
+            animatedCount++
+            const pulse = anim === 'fast' ? fastPulse : slowPulse
+            const scale = 1 + pulse * 0.15
+            billboard.width = baseSize * scale
+            billboard.height = baseSize * scale
           }
         }
 
-        // Auto-rotate
-        if (autoRotate.current && scene.mode === Cesium.SceneMode.SCENE3D) {
+        // Auto-rotate (only if user enabled Auto-Rotate in Settings, and idle gate open)
+        if (
+          effectiveAutoRotateRef.current &&
+          idleSpinGateRef.current &&
+          scene.mode === Cesium.SceneMode.SCENE3D
+        ) {
           viewer.camera.rotateRight(0.0004)
         }
 
@@ -603,24 +907,22 @@ export default function CesiumGlobe({ onGlobeReady }) {
       let lastPickTime = 0
 
       function resetIdleTimer() {
-        autoRotate.current = false
+        if (!effectiveAutoRotateRef.current) return
+        idleSpinGateRef.current = false
         clearTimeout(idleTimer.current)
         idleTimer.current = setTimeout(() => {
-          autoRotate.current = true
+          idleSpinGateRef.current = true
         }, 6000)
       }
 
-      // Helper: find item from a pick result
-      function findItemFromPick(picked) {
-        // PointPrimitive picks return the primitive and its _index
-        if (!Cesium.defined(picked) || !picked.primitive) return null
-        const collection = pointCollectionRef.current
-        if (!collection || picked.primitive !== collection) return null
-        // We need to find which item this point belongs to
-        const point = picked.primitive.get?.(picked.id)
-        if (!point) return null
-        for (const { point: p, item } of pointMapRef.current.values()) {
-          if (p === point) return item
+      function findPickedEvent(picked) {
+        if (!Cesium.defined(picked)) return null
+        const bbCollection = eventBillboardsRef.current
+        if (bbCollection && picked.collection === bbCollection) {
+          const pickedBB = picked.primitive
+          for (const { billboard, event } of eventBillboardMapRef.current.values()) {
+            if (billboard === pickedBB) return event
+          }
         }
         return null
       }
@@ -633,19 +935,32 @@ export default function CesiumGlobe({ onGlobeReady }) {
         const canvasPosition = movement.endPosition
         const picked = scene.pick(canvasPosition)
 
-        // Check PointPrimitive collection picks
+        // Check event billboard picks first
+        const hoveredEvent = findPickedEvent(picked)
+        if (hoveredEvent) {
+          const rect = container.getBoundingClientRect()
+          const screenX = rect.left + canvasPosition.x
+          const screenY = rect.top + canvasPosition.y
+          setHoveredMarker({
+            ...hoveredEvent,
+            _screenX: screenX,
+            _screenY: screenY,
+            _isEvent: true,
+          })
+          container.style.cursor = 'pointer'
+          return
+        }
+
+        // Check news BillboardCollection picks
         let hoveredItem = null
         if (Cesium.defined(picked)) {
-          // PointPrimitiveCollection returns picked.collection + picked.primitive
           const collection = pointCollectionRef.current
           if (collection && picked.collection === collection) {
-            // picked.primitive IS the individual PointPrimitive
-            const pickedPoint = picked.primitive
-            for (const { point, item } of pointMapRef.current.values()) {
-              if (point === pickedPoint) { hoveredItem = item; break }
+            const pickedBB = picked.primitive
+            for (const { billboard, item } of pointMapRef.current.values()) {
+              if (billboard === pickedBB) { hoveredItem = item; break }
             }
           }
-          // Legacy entity fallback
           if (!hoveredItem && picked.id?.properties?.newsItem) {
             hoveredItem = picked.id.properties.newsItem.getValue()
           }
@@ -665,14 +980,36 @@ export default function CesiumGlobe({ onGlobeReady }) {
 
       handler.setInputAction((click) => {
         const picked = scene.pick(click.position)
-        let clickedItem = null
 
+        // Check event billboard picks first
+        const clickedEvent = findPickedEvent(picked)
+        if (clickedEvent) {
+          setSelectedEvent(clickedEvent)
+          setSelectedMarker(null)
+          const camera = viewer.camera
+          const current = camera.positionCartographic
+          const currentHeight = current?.height ?? 10_000_000
+          const targetHeight = Math.max(600_000, currentHeight * 0.4)
+          camera.flyTo({
+            destination: Cesium.Cartesian3.fromDegrees(clickedEvent.lng, clickedEvent.lat, targetHeight),
+            orientation: {
+              heading: camera.heading,
+              pitch: Cesium.Math.clamp(camera.pitch, Cesium.Math.toRadians(-80), Cesium.Math.toRadians(-20)),
+              roll: 0,
+            },
+            duration: 1.4,
+          })
+          return
+        }
+
+        // Check news marker picks (billboards)
+        let clickedItem = null
         if (Cesium.defined(picked)) {
           const collection = pointCollectionRef.current
           if (collection && picked.collection === collection) {
-            const pickedPoint = picked.primitive
-            for (const { point, item } of pointMapRef.current.values()) {
-              if (point === pickedPoint) { clickedItem = item; break }
+            const pickedBB = picked.primitive
+            for (const { billboard, item } of pointMapRef.current.values()) {
+              if (billboard === pickedBB) { clickedItem = item; break }
             }
           }
           if (!clickedItem && picked.id?.properties?.newsItem) {
@@ -682,6 +1019,7 @@ export default function CesiumGlobe({ onGlobeReady }) {
 
         if (clickedItem) {
           setSelectedMarker(clickedItem)
+          setSelectedEvent(null)
           const camera = viewer.camera
           const current = camera.positionCartographic
           const currentHeight = current?.height ?? 10_000_000
@@ -708,10 +1046,11 @@ export default function CesiumGlobe({ onGlobeReady }) {
           return
         }
 
-        // If a news card is open and the user clicks away, dismiss
-        const hasSelectedMarker = !!useAtlasStore.getState().selectedMarker
-        if (hasSelectedMarker) {
+        // If a news card or event panel is open and the user clicks away, dismiss
+        const store = useAtlasStore.getState()
+        if (store.selectedMarker || store.selectedEvent) {
           setSelectedMarker(null)
+          setSelectedEvent(null)
           return
         }
 
@@ -740,6 +1079,10 @@ export default function CesiumGlobe({ onGlobeReady }) {
         container.style.cursor = 'grab'
       }, Cesium.ScreenSpaceEventType.LEFT_UP)
 
+      handler.setInputAction(() => {
+        resetIdleTimer()
+      }, Cesium.ScreenSpaceEventType.WHEEL)
+
       const viewCenter = getTimezoneViewCenter()
 
       // ---------------------------------------------------------------
@@ -754,7 +1097,7 @@ export default function CesiumGlobe({ onGlobeReady }) {
           duration: 1.5,
           easingFunction: Cesium.EasingFunction.CUBIC_IN_OUT,
         })
-        autoRotate.current = true
+        idleSpinGateRef.current = useAtlasStore.getState().getEffectiveSetting('autoRotate')
         useAtlasStore.getState().setSelectedMarker(null)
       })
 
@@ -781,14 +1124,8 @@ export default function CesiumGlobe({ onGlobeReady }) {
         }, 300)
       }
 
-      // ---------------------------------------------------------------
-      //  Load initial markers
-      // ---------------------------------------------------------------
-      const store = useAtlasStore.getState()
-      if (store.newsItems.length === 0) store.setNewsItems(MOCK_NEWS)
-      const items =
-        store.newsItems.length > 0 ? store.newsItems : MOCK_NEWS
-      rebuildMarkers(viewer, items)
+      // News markers: single source of truth is the `newsItems` useEffect below (content signature).
+      // Avoid duplicate rebuildMarkers here — async init order was racing the effect and clearing markers.
 
       // Signal ready after first frame so App can hide starfield with no gap
       const notifyReady = onGlobeReadyRef.current
@@ -819,7 +1156,10 @@ export default function CesiumGlobe({ onGlobeReady }) {
     return () => {
       destroyed = true
       clearTimeout(idleTimer.current)
+      pointMapRef.current.clear()
+      pointCollectionRef.current = null
       const viewer = viewerRef.current
+      viewerRef.current = null
       if (viewer && !viewer.isDestroyed()) viewer.destroy()
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -879,32 +1219,109 @@ export default function CesiumGlobe({ onGlobeReady }) {
     // Screen space error
     scene.globe.maximumScreenSpaceError = eff('maxScreenSpaceError')
 
+    // Auto-rotate — keep in sync when user toggles Settings or tier changes
+    const ar = eff('autoRotate')
+    effectiveAutoRotateRef.current = ar
+    idleSpinGateRef.current = ar
+    if (!ar) clearTimeout(idleTimer.current)
+
     scene.requestRender()
   }, [resolvedTier, qualityOverrides]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // React to news data / filter changes — toggle show instead of full rebuild
+  // News markers: rebuild when article *set* changes (signature), not array reference; toggle on category-only changes
   useEffect(() => {
     const viewer = viewerRef.current
     if (!viewer || viewer.isDestroyed()) return
 
-    const items = newsItems.length > 0 ? newsItems : MOCK_NEWS
-    const filtered = items.filter((item) => activeCategories.has(item.category))
+    const filtered = newsItems.filter((item) => activeCategories.has(item.category))
+    const plottableCount = filtered.filter((i) => i.lat != null && i.lng != null).length
 
-    // If the underlying data (newsItems) changed, do a full rebuild
-    if (allItemsRef.current !== items && allItemsRef.current.length !== items.length) {
+    const contentSig = getNewsContentSignature(newsItems)
+    const catSig = getActiveCategoriesSignature(activeCategories)
+
+    const contentChanged = lastNewsContentSigRef.current !== contentSig
+    const categoriesOnlyChanged =
+      !contentChanged && lastActiveCategoriesSigRef.current !== catSig
+
+    lastNewsContentSigRef.current = contentSig
+    lastActiveCategoriesSigRef.current = catSig
+
+    const mapEmptyButShouldShow = plottableCount > 0 && pointMapRef.current.size === 0
+
+    if (contentChanged || mapEmptyButShouldShow) {
       rebuildMarkers(viewer, filtered)
-    } else {
-      // Category filter change — just toggle point.show without rebuilding
+    } else if (categoriesOnlyChanged) {
       const filteredIds = new Set(filtered.map((i) => i.id))
       const map = pointMapRef.current
-      for (const [id, { point }] of map) {
-        point.show = filteredIds.has(id)
+      for (const [id, { billboard }] of map) {
+        billboard.show = filteredIds.has(id)
       }
       updateVisibility(viewer)
     }
 
     viewer.scene.requestRender()
   }, [newsItems, activeCategories]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // React to EventBus events — rebuild event billboard markers + enclosures
+  const enclosureEntitiesRef = useRef([])
+
+  useEffect(() => {
+    const viewer = viewerRef.current
+    if (!viewer || viewer.isDestroyed()) return
+    if (events.length === 0 && eventBillboardMapRef.current.size === 0) return
+
+    rebuildEventMarkers(viewer, events)
+
+    // Remove old enclosure entities
+    for (const entity of enclosureEntitiesRef.current) {
+      viewer.entities.remove(entity)
+    }
+    enclosureEntitiesRef.current = []
+
+    // Build cluster enclosures
+    const clusters = clusterEvents(events, 200, 5)
+    for (const cluster of clusters) {
+      const tierColor = TIER_COLORS[cluster.tier] || '#1a90ff'
+      const color = Cesium.Color.fromCssColorString(tierColor)
+
+      // Build convex hull from cluster events
+      const points = cluster.events.map(e => [e.lng, e.lat])
+      const hull = convexHull(points)
+      if (hull.length < 3) continue
+
+      const positions = hull.flatMap(([lng, lat]) => [lng, lat])
+
+      const entity = viewer.entities.add({
+        polygon: {
+          hierarchy: Cesium.Cartesian3.fromDegreesArray(positions),
+          material: color.withAlpha(0.12),
+          outline: true,
+          outlineColor: color.withAlpha(0.6),
+          outlineWidth: 2,
+          height: 0,
+        },
+      })
+      enclosureEntitiesRef.current.push(entity)
+
+      // Add count badge at centroid
+      const badge = viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(cluster.centroid.lng, cluster.centroid.lat, 0),
+        label: {
+          text: String(cluster.count),
+          font: 'bold 12px JetBrains Mono',
+          fillColor: Cesium.Color.WHITE,
+          outlineColor: color.withAlpha(0.8),
+          outlineWidth: 3,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          disableDepthTestDistance: GLOBE_BILLBOARD_DISABLE_DEPTH_TEST_DISTANCE,
+          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 25_000_000),
+        },
+      })
+      enclosureEntitiesRef.current.push(badge)
+    }
+
+    viewer.scene.requestRender()
+  }, [events, activeDomains, severityFloor]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div

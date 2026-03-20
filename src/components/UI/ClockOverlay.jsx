@@ -174,9 +174,10 @@ export default function ClockOverlay() {
     setOpen((v) => !v)
   }
 
+  /* z-[35]: stay below .hud-header (z-40) so ⋯ dropdown isn’t covered by clock/lat-lon text */
   return (
     <motion.div
-      className="fixed inset-0 z-50 pointer-events-none"
+      className="fixed inset-0 z-[35] pointer-events-none"
       initial={{ opacity: 0, y: -10 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -10 }}

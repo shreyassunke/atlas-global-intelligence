@@ -1,13 +1,12 @@
 import { useEffect, useRef } from 'react'
 import { useAtlasStore } from '../store/atlasStore'
-import { MOCK_NEWS } from '../utils/mockData'
-import { COUNTRY_COORDS } from '../utils/geo'
 import { fetchAllSources } from '../utils/newsSources'
 import { getAvailableProviders } from '../config/newsProviders'
 import { fetchFromProviders } from '../services/newsAPI/fetcher'
+import { fetchYouTubeVideos } from '../services/newsAPI/adapters/youtube'
+import { normalizeNewsText } from '../utils/youtube'
 
-const MIN_GLOBE_POINTS = 100
-const NEWS_CACHE_KEY = 'atlas_cached_news_items'
+const NEWS_CACHE_KEY = 'atlas_cached_news_v3'
 const LAST_AUTO_REFRESH_DATE_KEY = 'atlas_last_auto_refresh_date'
 const MANUAL_REFRESH_DATE_KEY = 'atlas_manual_refresh_date'
 
@@ -16,20 +15,6 @@ function getTodayLocal() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-/** Source ID -> country code for fallback when title/description geocoding fails */
-const SOURCE_TO_COUNTRY = {
-  'bbc-news': 'gb', 'reuters': 'gb', 'the-guardian-uk': 'gb', 'independent': 'gb',
-  'financial-times': 'gb', 'cnn': 'us', 'fox-news': 'us', 'nbc-news': 'us',
-  'abc-news': 'us', 'cbs-news': 'us', 'the-washington-post': 'us', 'politico': 'us',
-  'npr': 'us', 'usa-today': 'us', 'axios': 'us', 'associated-press': 'us',
-  'bloomberg': 'us', 'business-insider': 'us', 'cnbc': 'us', 'techcrunch': 'us',
-  'the-verge': 'us', 'ars-technica': 'us', 'wired': 'us', 'engadget': 'us',
-  'the-wall-street-journal': 'us', 'al-jazeera-english': 'qa', 'the-times-of-india': 'in',
-  'the-hindu': 'in', 'abc-news-au': 'au', 'nhk': 'jp', 'le-monde': 'fr',
-  'der-spiegel': 'de', 'focus': 'de', 'ansa': 'it', 'el-mundo': 'es',
-  'globo': 'br', 'infobae': 'ar', 'cnn-spanish': 'us', 'rt': 'ru',
-  'xinhua': 'cn', 'scmp': 'hk', 'the-jakarta-post': 'id', 'straits-times': 'sg',
-}
 const GEOCODE_CACHE_KEY = 'atlas_geocode_cache'
 const CACHE_TTL = 24 * 60 * 60 * 1000
 
@@ -217,43 +202,6 @@ const LOCATION_DB = {
   'north america': { lat: 45.00, lng: -100.00 }, 'asia pacific': { lat: 10.00, lng: 130.00 },
 }
 
-/** Publisher HQ coordinates — used as fallback when article has no geographic subject */
-const SOURCE_HQ_COORDS = {
-  'cnn': { lat: 33.76, lng: -84.39 },   // Atlanta
-  'fox-news': { lat: 40.76, lng: -73.99 },   // NYC
-  'nbc-news': { lat: 40.76, lng: -73.98 },   // NYC 30 Rock
-  'abc-news': { lat: 40.77, lng: -73.98 },   // NYC
-  'cbs-news': { lat: 40.76, lng: -73.97 },   // NYC
-  'the-washington-post': { lat: 38.90, lng: -77.03 },   // DC
-  'politico': { lat: 38.90, lng: -77.02 },   // DC
-  'npr': { lat: 38.89, lng: -77.01 },   // DC
-  'usa-today': { lat: 38.85, lng: -77.07 },   // McLean VA
-  'axios': { lat: 38.91, lng: -77.04 },   // DC
-  'associated-press': { lat: 40.76, lng: -73.98 },   // NYC
-  'bloomberg': { lat: 40.76, lng: -73.97 },   // NYC
-  'business-insider': { lat: 40.74, lng: -73.99 },   // NYC
-  'cnbc': { lat: 40.76, lng: -73.98 },   // NYC / Englewood Cliffs
-  'the-wall-street-journal': { lat: 40.71, lng: -74.01 },  // NYC
-  'techcrunch': { lat: 37.77, lng: -122.42 },  // SF
-  'the-verge': { lat: 40.74, lng: -73.99 },   // NYC
-  'ars-technica': { lat: 40.74, lng: -74.00 },   // NYC
-  'wired': { lat: 37.77, lng: -122.40 },  // SF
-  'engadget': { lat: 37.78, lng: -122.39 },  // SF
-  'bbc-news': { lat: 51.52, lng: -0.14 },    // London
-  'reuters': { lat: 51.51, lng: -0.11 },    // London
-  'the-guardian-uk': { lat: 51.53, lng: -0.12 },    // London
-  'independent': { lat: 51.50, lng: -0.12 },    // London
-  'financial-times': { lat: 51.51, lng: -0.09 },    // London
-  'al-jazeera-english': { lat: 25.29, lng: 51.53 },    // Doha
-  'the-times-of-india': { lat: 19.08, lng: 72.88 },    // Mumbai
-  'the-hindu': { lat: 13.06, lng: 80.25 },    // Chennai
-  'abc-news-au': { lat: -33.88, lng: 151.20 },  // Sydney
-  'nhk': { lat: 35.67, lng: 139.70 },   // Tokyo
-  'le-monde': { lat: 48.84, lng: 2.33 },     // Paris
-  'der-spiegel': { lat: 53.55, lng: 10.00 },    // Hamburg
-  'focus': { lat: 48.14, lng: 11.58 },    // Munich
-  'scmp': { lat: 22.28, lng: 114.17 },   // Hong Kong
-}
 
 const CATEGORY_KEYWORDS = {
   // Hard news
@@ -431,25 +379,6 @@ function extractLocation(text) {
   return null
 }
 
-function hashToUnitFloat(str) {
-  let h = 2166136261
-  for (let i = 0; i < str.length; i += 1) {
-    h ^= str.charCodeAt(i)
-    h = Math.imul(h, 16777619)
-  }
-  // Map uint32 -> [0,1)
-  return ((h >>> 0) % 1000000) / 1000000
-}
-
-function jitterCoords(coords, seed, maxDeltaDeg = 3.0) {
-  const s = String(seed || '')
-  const a = hashToUnitFloat(`${s}:a`) * 2 - 1
-  const b = hashToUnitFloat(`${s}:b`) * 2 - 1
-  const lat = Math.max(-85, Math.min(85, coords.lat + a * maxDeltaDeg))
-  const lng = Math.max(-179, Math.min(179, coords.lng + b * maxDeltaDeg))
-  return { lat, lng }
-}
-
 function loadGeocodeCache() {
   try {
     const data = JSON.parse(localStorage.getItem(GEOCODE_CACHE_KEY) || '{}')
@@ -494,21 +423,48 @@ function saveNewsItemsToCache(items) {
 
 const NOMINATIM_TIMEOUT_MS = 3000
 
+const NOMINATIM_ACCEPTED_TYPES = new Set([
+  'city', 'town', 'village', 'hamlet', 'suburb', 'neighbourhood', 'borough',
+  'municipality', 'district', 'quarter',
+  'building', 'amenity', 'office', 'shop', 'tourism', 'historic', 'aeroway',
+  'military', 'railway', 'station',
+])
+
+function isNominatimResultAccepted(hit) {
+  if (!hit) return false
+  const type = (hit.type || '').toLowerCase()
+  const cls = (hit.class || '').toLowerCase()
+  if (NOMINATIM_ACCEPTED_TYPES.has(type)) return true
+  if (cls === 'place' && type !== 'country' && type !== 'continent' && type !== 'state' && type !== 'region') return true
+  if (cls === 'boundary' && type === 'administrative') {
+    const rank = parseInt(hit.place_rank, 10)
+    if (!isNaN(rank) && rank >= 12) return true
+  }
+  return false
+}
+
 async function geocodeWithNominatim(query, cache) {
-  if (cache[query]) return { lat: cache[query].lat, lng: cache[query].lng }
+  if (cache[query]) {
+    if (cache[query].rejected) return null
+    return { lat: cache[query].lat, lng: cache[query].lng }
+  }
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), NOMINATIM_TIMEOUT_MS)
   try {
     const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`,
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1&addressdetails=1`,
       { headers: { 'User-Agent': 'ATLAS-Globe/1.0' }, signal: controller.signal },
     )
     clearTimeout(timer)
     const data = await res.json()
     if (data.length > 0) {
-      const result = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) }
-      cache[query] = { ...result, ts: Date.now() }
-      return result
+      const hit = data[0]
+      if (isNominatimResultAccepted(hit)) {
+        const result = { lat: parseFloat(hit.lat), lng: parseFloat(hit.lon) }
+        cache[query] = { ...result, ts: Date.now() }
+        return result
+      }
+      cache[query] = { rejected: true, ts: Date.now() }
     }
   } catch {
     clearTimeout(timer)
@@ -516,17 +472,11 @@ async function geocodeWithNominatim(query, cache) {
   return null
 }
 
-/**
- * Batch Nominatim lookups with staggered delays.
- * Instead of: sequential 1.1s sleep × N lookups = ~N*1.1s
- * Now: stagger launches 120ms apart, total ≈ max(response time) + 120ms*N
- * Nominatim rate limit is 1 req/s, but with stagger this stays under limit.
- */
 async function batchGeocodeNominatim(queries, cache) {
   const results = new Map()
   const uncached = queries.filter((q) => {
     if (cache[q]) {
-      results.set(q, { lat: cache[q].lat, lng: cache[q].lng })
+      if (!cache[q].rejected) results.set(q, { lat: cache[q].lat, lng: cache[q].lng })
       return false
     }
     return true
@@ -546,158 +496,77 @@ async function batchGeocodeNominatim(queries, cache) {
   return results
 }
 
-
-/** Build sourceId -> country from catalog (covers all 120+ sources, not just hardcoded) */
-function buildSourceCountryMap(catalog) {
-  const map = { ...SOURCE_TO_COUNTRY }
-  if (catalog && Array.isArray(catalog)) {
-    for (const s of catalog) {
-      if (s.id && s.country) map[s.id] = String(s.country).toLowerCase()
-    }
-  }
-  return map
-}
-
 async function processArticles(articles, sourceCatalog, { maxItems = 300, maxNominatimLookups = 10 } = {}) {
   const geocodeCache = loadGeocodeCache()
-  const sourceCountryMap = buildSourceCountryMap(sourceCatalog)
   const seenUrls = new Set()
 
-  // First pass: resolve local locations, collect Nominatim candidates
   const processed = []
-  const nominatimCandidates = [] // { index, query }
+  const nominatimCandidates = []
 
   for (const article of articles) {
     if (processed.length >= maxItems) break
     if (!article.url || seenUrls.has(article.url)) continue
     seenUrls.add(article.url)
 
-    const text = `${article.title} ${article.description || ''}`
-    let coords = extractLocation(text)
-    let fromCountryFallback = false
+    const title = normalizeNewsText(article.title)
+    const description = normalizeNewsText(article.description)
+    const normalizedArticle = { ...article, title, description }
 
-    if (!coords) {
-      // Step 2: Publisher HQ (exact office, not generic country)
-      const srcId = article.source?.id
-      if (srcId && SOURCE_HQ_COORDS[srcId]) {
-        coords = SOURCE_HQ_COORDS[srcId]
-        fromCountryFallback = true  // still jitter slightly so HQ articles don't stack
-      }
-    }
+    const text = `${title} ${description}`
+    const coords = extractLocation(text)
 
-    if (!coords) {
-      // Step 3: Country-centre fallback
-      let countryCode = (article.source?.id && sourceCountryMap[article.source.id]) ||
-        (article.source?.country && String(article.source.country).toLowerCase())
-      if (countryCode && countryCode.includes(',')) {
-        countryCode = countryCode.split(',')[0].trim()
-      }
-      if (countryCode && COUNTRY_COORDS[countryCode]) {
-        coords = COUNTRY_COORDS[countryCode]
-        fromCountryFallback = true
-      }
-    }
-
-    // Mark for Nominatim batch if still no coords
     let needsNominatim = false
     if (!coords && nominatimCandidates.length < maxNominatimLookups) {
-      const query = article.title?.split(' - ')[0] || ''
+      const query = title.split(' - ')[0] || ''
       if (query.trim().length > 2) {
         nominatimCandidates.push({ index: processed.length, query: query.trim() })
         needsNominatim = true
       }
     }
 
-    processed.push({ article, coords, fromCountryFallback, needsNominatim })
+    processed.push({ article: normalizedArticle, coords, needsNominatim })
   }
 
-  // Batch Nominatim lookups (staggered, non-blocking)
   if (nominatimCandidates.length > 0) {
     const queries = nominatimCandidates.map((c) => c.query)
     const geocodeResults = await batchGeocodeNominatim(queries, geocodeCache)
     for (const { index, query } of nominatimCandidates) {
       const coords = geocodeResults.get(query)
-      if (coords) {
-        processed[index].coords = coords
-        processed[index].fromCountryFallback = false
-      }
+      if (coords) processed[index].coords = coords
     }
   }
 
-  // Final pass: build items with resolved coords
   const items = []
-  const locationCounts = {}
-
   for (let i = 0; i < processed.length; i++) {
-    const entry = processed[i]
-    const { article } = entry
-    let coords = entry.coords
-
-    // Hash-based fallback for articles still without coords
-    if (!coords) {
-      const countryKeys = Object.keys(COUNTRY_COORDS)
-      const idx = Math.floor(hashToUnitFloat(article.url || article.title) * countryKeys.length)
-      const fallbackCountry = countryKeys[idx] || 'us'
-      coords = jitterCoords(COUNTRY_COORDS[fallbackCountry], article.url, 2.5)
-    } else if (entry.fromCountryFallback) {
-      coords = jitterCoords(coords, article.url)
-    }
-
+    const { article, coords } = processed[i]
     const category = categorizeArticle(article)
     const importance = scoreImportance(article, category)
-
-    const locKey = `${coords.lat.toFixed(1)},${coords.lng.toFixed(1)}`
-    locationCounts[locKey] = (locationCounts[locKey] || 0) + 1
 
     let normalizedUrl = article.url
     if (normalizedUrl && !/^https?:\/\//i.test(normalizedUrl)) {
       normalizedUrl = `https://${normalizedUrl.replace(/^\/+/, '')}`
     }
 
-    items.push({
+    const entry = {
       id: article.url || `${Date.now()}-${items.length}`,
       title: article.title,
       url: normalizedUrl,
-      lat: coords.lat,
-      lng: coords.lng,
+      lat: coords?.lat ?? null,
+      lng: coords?.lng ?? null,
       category,
       importance,
-      magnitude: locationCounts[locKey],
+      magnitude: 1,
       source: article.source?.name || 'Unknown',
       publishedAt: article.publishedAt,
       description: article.description,
-    })
+    }
+    if (article.mediaType) entry.mediaType = article.mediaType
+    if (article.thumbnailUrl) entry.thumbnailUrl = article.thumbnailUrl
+    if (article.isLive) entry.isLive = true
+    items.push(entry)
   }
-
-  // De-cluster: spread articles that share the same rounded location
-  deCluster(items)
 
   return items
-}
-
-/**
- * Spread co-located markers in a golden-angle spiral so they don't overlap.
- * Groups items by rounded lat/lng, then repositions each group member
- * along an outward spiral from the group centre.
- */
-function deCluster(items, radiusDeg = 2.0) {
-  const groups = {}
-  for (const item of items) {
-    const key = `${item.lat.toFixed(1)},${item.lng.toFixed(1)}`
-      ; (groups[key] ??= []).push(item)
-  }
-  const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5)) // ~2.3998 rad
-  for (const members of Object.values(groups)) {
-    if (members.length < 2) continue
-    const cLat = members[0].lat
-    const cLng = members[0].lng
-    for (let i = 0; i < members.length; i++) {
-      const r = radiusDeg * Math.sqrt((i + 1) / members.length)
-      const theta = i * GOLDEN_ANGLE
-      members[i].lat = Math.max(-85, Math.min(85, cLat + r * Math.cos(theta)))
-      members[i].lng = Math.max(-179, Math.min(179, cLng + r * Math.sin(theta)))
-    }
-  }
 }
 
 export function useNewsData() {
@@ -719,12 +588,15 @@ export function useNewsData() {
 
     async function fetchNews() {
       const providers = getAvailableProviders()
-      if (providers.length === 0 || selectedSources.length === 0) {
+      const ytKey = import.meta.env.VITE_YOUTUBE_API_KEY || ''
+      const canFetchText = providers.length > 0 && selectedSources.length > 0
+
+      if (!canFetchText && !ytKey) {
         const cached = loadCachedNewsItems()
         if (cached && cached.length > 0) {
           setNewsItems(cached)
         } else {
-          setNewsItems(MOCK_NEWS)
+          setNewsItems([])
         }
         return
       }
@@ -733,58 +605,45 @@ export function useNewsData() {
 
       try {
         let catalog = sourceCatalog
-        if (catalog.length === 0) {
+        if (canFetchText && catalog.length === 0) {
           const newsApiKey = import.meta.env.VITE_NEWS_API_KEY || providers.find((p) => p.id === 'newsapi')?.getKeys()?.[0]
           catalog = await fetchAllSources(newsApiKey)
           useAtlasStore.getState().setSourceCatalog(catalog)
         }
 
-        const { articles: allArticles } = await fetchFromProviders({
-          selectedSources,
-          catalog,
-          targetArticles: 400,
-          newsApiPages: 2,
-          broaden: true,
-        })
+        const [providerResult, ytResult] = await Promise.all([
+          canFetchText
+            ? fetchFromProviders({
+                selectedSources,
+                catalog,
+                targetArticles: 400,
+                newsApiPages: 2,
+                broaden: true,
+              })
+            : Promise.resolve({ articles: [] }),
+          ytKey ? fetchYouTubeVideos(ytKey) : Promise.resolve({ articles: [] }),
+        ])
+
+        const seenUrls = new Set()
+        const allArticles = []
+        for (const a of [...providerResult.articles, ...ytResult.articles]) {
+          if (a.url && !seenUrls.has(a.url)) {
+            seenUrls.add(a.url)
+            allArticles.push(a)
+          }
+        }
 
         if (allArticles.length === 0) {
           const cached = loadCachedNewsItems()
           if (cached && cached.length > 0) {
             setNewsItems(cached)
           } else {
-            setNewsItems(MOCK_NEWS)
+            setNewsItems([])
           }
           return
         }
 
-        let items = await processArticles(allArticles, catalog, { maxItems: 500, maxNominatimLookups: 18 })
-
-        if (items.length < MIN_GLOBE_POINTS) {
-          const { articles: moreArticles } = await fetchFromProviders({
-            selectedSources,
-            catalog,
-            targetArticles: 500,
-            newsApiPages: 2,
-            broaden: true,
-          })
-
-          if (moreArticles.length > 0) {
-            const byUrl = new Map()
-            for (const a of allArticles) if (a?.url) byUrl.set(a.url, a)
-            for (const a of moreArticles) if (a?.url) byUrl.set(a.url, a)
-            const merged = Array.from(byUrl.values())
-            items = await processArticles(merged, catalog, { maxItems: 500, maxNominatimLookups: 12 })
-          }
-        }
-
-        if (items.length > 0 && items.length < MIN_GLOBE_POINTS) {
-          const needed = MIN_GLOBE_POINTS - items.length
-          const supplement = MOCK_NEWS.slice(0, needed).map((m, i) => ({
-            ...m,
-            id: `supplement-${i}-${Date.now()}`,
-          }))
-          items = [...items, ...supplement]
-        }
+        const items = await processArticles(allArticles, catalog, { maxItems: 500, maxNominatimLookups: 15 })
 
         if (items.length > 0) {
           saveNewsItemsToCache(items)
@@ -794,7 +653,7 @@ export function useNewsData() {
           if (cached && cached.length > 0) {
             setNewsItems(cached)
           } else {
-            setNewsItems(MOCK_NEWS)
+            setNewsItems([])
           }
         }
       } catch {
@@ -802,14 +661,16 @@ export function useNewsData() {
         if (cached && cached.length > 0) {
           setNewsItems(cached)
         } else {
-          setNewsItems(MOCK_NEWS)
+          setNewsItems([])
         }
       } finally {
         setIsLoading(false)
       }
     }
 
-    // Daily auto: run once per day on first load
+    // Daily auto: run once per day on first load — also refetch when YouTube is enabled but cache has no video rows
+    const ytKeyEnv = import.meta.env.VITE_YOUTUBE_API_KEY || ''
+
     if (lastAuto !== today) {
       fetchNews().then(() => {
         try {
@@ -820,8 +681,25 @@ export function useNewsData() {
       const cached = loadCachedNewsItems()
       if (cached && cached.length > 0) {
         setNewsItems(cached)
+        const cacheMissingVideos = ytKeyEnv && !cached.some((i) => i.mediaType === 'video')
+        if (cacheMissingVideos) {
+          fetchNews().then(() => {
+            try {
+              localStorage.setItem(LAST_AUTO_REFRESH_DATE_KEY, today)
+            } catch { /* quota */ }
+          })
+        }
       } else {
-        setNewsItems(MOCK_NEWS)
+        setNewsItems([])
+        const providers = getAvailableProviders()
+        const canFetchText = providers.length > 0 && selectedSources.length > 0
+        if (ytKeyEnv || canFetchText) {
+          fetchNews().then(() => {
+            try {
+              localStorage.setItem(LAST_AUTO_REFRESH_DATE_KEY, today)
+            } catch { /* quota */ }
+          })
+        }
       }
     }
 

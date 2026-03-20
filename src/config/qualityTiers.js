@@ -33,7 +33,7 @@ export const QUALITY_TIERS = {
         atmosphere: 'fragment', // perFragmentAtmosphere
         maxScreenSpaceError: 1.5,
         maxMarkers: 300,
-        autoRotate: true,
+        autoRotate: false, // opt-in via Settings — idle spin only when enabled
         targetFrameRate: undefined, // uncapped
     },
     medium: {
@@ -50,7 +50,7 @@ export const QUALITY_TIERS = {
         atmosphere: 'vertex',
         maxScreenSpaceError: 4.0,
         maxMarkers: 150,
-        autoRotate: true,
+        autoRotate: false,
         targetFrameRate: 30,
     },
     low: {

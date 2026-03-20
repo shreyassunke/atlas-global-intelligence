@@ -8,11 +8,16 @@ import BackgroundAudio from './components/Audio/BackgroundAudio'
 import Header from './components/UI/Header'
 import FilterPanel from './components/UI/FilterPanel'
 import NewsCard from './components/UI/NewsCard'
+import EventPanel from './components/UI/EventPanel'
 import LiveTicker from './components/Feed/LiveTicker'
 import HoverLabel from './components/UI/RegionRing'
 import ClockOverlay from './components/UI/ClockOverlay'
 import StreetViewOverlay from './components/UI/StreetViewOverlay'
+import YouTubeEmbedOverlay from './components/UI/YouTubeEmbedOverlay'
 import SettingsPanel from './components/UI/SettingsPanel'
+import SourcesPanel from './components/UI/SourcesPanel'
+import DomainFilters from './components/UI/DomainFilters'
+import { usePreferencesSync } from './hooks/usePreferencesSync'
 
 // Lazy-load heavy 3D components — Cesium (~4MB) and globe.gl/Three.js (~1MB) don't
 // need to be in the initial bundle since they're only rendered after onboarding.
@@ -31,7 +36,42 @@ export default function App() {
   const [globeReady, setGlobeReady] = useState(false)
   const lastSunAngleRef = useRef(0)
   const globeMode = useAtlasStore((s) => s.globeMode)
+  const initEventBusSystem = useAtlasStore((s) => s.initEventBusSystem)
+  const colorblindMode = useAtlasStore((s) => s.colorblindMode)
+  const [sourcesOpen, setSourcesOpen] = useState(false)
+  const [filtersOpen, setFiltersOpen] = useState(false)
   useNewsData()
+  usePreferencesSync()
+
+  useEffect(() => {
+    document.body.setAttribute('data-colorblind', String(colorblindMode))
+  }, [colorblindMode])
+
+  useEffect(() => {
+    const isMobile = window.innerWidth < 768 || 'ontouchstart' in window
+    useAtlasStore.getState().setMobileMode(isMobile)
+
+    const resizeHandler = () => {
+      useAtlasStore.getState().setMobileMode(window.innerWidth < 768)
+    }
+    window.addEventListener('resize', resizeHandler)
+
+    if (navigator.connection) {
+      const checkBandwidth = () => {
+        const conn = navigator.connection
+        const slow = conn.effectiveType === '2g' || conn.effectiveType === 'slow-2g' || (conn.downlink && conn.downlink < 1.5)
+        useAtlasStore.getState().setLowBandwidthMode(slow)
+      }
+      checkBandwidth()
+      navigator.connection.addEventListener('change', checkBandwidth)
+      return () => {
+        window.removeEventListener('resize', resizeHandler)
+        navigator.connection.removeEventListener('change', checkBandwidth)
+      }
+    }
+
+    return () => window.removeEventListener('resize', resizeHandler)
+  }, [])
 
   const onGlobeView = hasCompletedOnboarding && !launchTransitionActive
   const showStarfield =
@@ -42,6 +82,14 @@ export default function App() {
   useEffect(() => {
     if (!onGlobeView) setGlobeReady(false)
   }, [onGlobeView])
+
+  // Initialize EventBus when globe view is active
+  useEffect(() => {
+    if (onGlobeView) {
+      initEventBusSystem()
+    }
+  }, [onGlobeView]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const onSunAngle = useCallback((angleRad) => {
     const now = Date.now()
     if (now - lastSunAngleRef.current >= SUN_ANGLE_THROTTLE_MS) {
@@ -57,12 +105,29 @@ export default function App() {
 
       if (e.key === 'Escape') {
         setHudHidden(false)
+        useAtlasStore.getState().setSelectedEvent(null)
+        useAtlasStore.getState().setSelectedMarker(null)
         return
       }
 
       if ((e.key === 'f' || e.key === 'F') && !e.metaKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault()
         setHudHidden((v) => !v)
+      }
+
+      if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey) {
+        const state = useAtlasStore.getState()
+        const sorted = [...state.events]
+          .sort((a, b) => b.severity - a.severity || new Date(b.timestamp) - new Date(a.timestamp))
+        if (sorted.length === 0) return
+
+        e.preventDefault()
+        const currentId = state.selectedEvent?.id
+        const currentIdx = sorted.findIndex(ev => ev.id === currentId)
+        const nextIdx = e.shiftKey
+          ? (currentIdx <= 0 ? sorted.length - 1 : currentIdx - 1)
+          : (currentIdx + 1) % sorted.length
+        state.setSelectedEvent(sorted[nextIdx])
       }
     }
 
@@ -73,7 +138,6 @@ export default function App() {
   return (
     <>
       <BackgroundAudio />
-      <div className="scanline-overlay" />
       {/* Persistent starfield: same instance from setup through transition. Never unmounts until globe. */}
       {showStarfield && (
         <div className="fixed inset-0 z-0" aria-hidden>
@@ -134,14 +198,34 @@ export default function App() {
                   <Header
                     hudHidden={hudHidden}
                     onToggleHud={() => setHudHidden((v) => !v)}
+                    onToggleSources={() => setSourcesOpen((v) => !v)}
+                    onToggleFilters={() => setFiltersOpen((v) => !v)}
+                    filtersOpen={filtersOpen}
                   />
                   <ClockOverlay />
-                  <FilterPanel />
+
+                  <AnimatePresence>
+                    {filtersOpen && (
+                      <motion.div
+                        className="hud-filters-sidebar"
+                        initial={{ opacity: 0, x: -12 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -12 }}
+                        transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                      >
+                        <DomainFilters />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  <EventPanel />
                   <NewsCard />
                   <StreetViewOverlay />
+                  <YouTubeEmbedOverlay />
                   <HoverLabel />
                   <LiveTicker />
                   <SettingsPanel />
+                  <SourcesPanel open={sourcesOpen} onClose={() => setSourcesOpen(false)} />
                 </motion.div>
               )}
             </AnimatePresence>

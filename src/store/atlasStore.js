@@ -2,6 +2,8 @@ import { create } from 'zustand'
 import { DEFAULT_SOURCES, NEWS_SOURCES } from '../utils/newsSources'
 import { CATEGORY_KEYS } from '../utils/categoryColors'
 import { loadQualitySettings, saveQualitySettings, loadGlobeMode, saveGlobeMode, QUALITY_TIERS } from '../config/qualityTiers'
+import { initEventBus, startFetching, stopFetching, subscribeToBatchUpdates, subscribeToSourceStatus, destroyEventBus } from '../core/eventBus'
+import { supabase } from '../services/supabase'
 
 const STORAGE_KEY_SOURCES = 'atlas_selected_sources'
 const STORAGE_KEY_ONBOARDED = 'atlas_onboarded'
@@ -55,10 +57,32 @@ export const useAtlasStore = create((set, get) => ({
   sourceCatalog: [],
   streetViewLocation: null,
   isStreetViewOpen: false,
+  /** { videoId, title, url, isLive } | null — when set, YouTube embed overlay is shown */
+  youtubeEmbed: null,
   manualRefreshUsedToday: false,
   triggerManualRefresh: null,
   launchTransitionActive: false,
   skipCesiumIntro: false,
+
+  // ── EventBus / Intel Events ──
+  events: [],
+  eventMap: {},
+  tierCounts: { latent: 0, active: 0, critical: 0 },
+  selectedEvent: null,
+  sourceStatuses: {},
+  eventBusReady: false,
+  severityFloor: 1,
+  activeDomains: new Set(['conflict', 'cyber', 'natural', 'humanitarian', 'economic', 'signals', 'hazard']),
+  focusedEventId: null,
+  anomalies: [],
+  colorblindMode: localStorage.getItem('atlas_colorblind') === 'true',
+  mobileMode: false,
+  lowBandwidthMode: false,
+
+  // ── Auth / User ──
+  user: null,
+  /** 'auth' | 'sources' — tracks which sub-step of onboarding the user is on */
+  onboardingStep: 'auth',
 
   // ── Quality & Globe Renderer ──
   /** 'cesium' | 'globegl' | 'leaflet' */
@@ -136,8 +160,16 @@ export const useAtlasStore = create((set, get) => ({
     set(() => ({
       streetViewLocation: { lat, lng, source, meta },
       isStreetViewOpen: true,
+      youtubeEmbed: null,
     })),
   closeStreetView: () => set(() => ({ isStreetViewOpen: false })),
+
+  openYouTubeEmbed: ({ videoId, title = '', url = '', isLive = false }) =>
+    set(() => ({
+      youtubeEmbed: { videoId, title, url, isLive },
+      isStreetViewOpen: false,
+    })),
+  closeYouTubeEmbed: () => set({ youtubeEmbed: null }),
 
   // ── Quality & Globe Mode Setters ──
   setGlobeMode: (mode) => {
@@ -174,13 +206,133 @@ export const useAtlasStore = create((set, get) => ({
   toggleSettings: () => set((s) => ({ settingsOpen: !s.settingsOpen })),
   setSettingsOpen: (v) => set({ settingsOpen: v }),
 
-  /**
-   * Get the effective value for a quality setting, accounting for user overrides.
-   */
   getEffectiveSetting: (key) => {
     const state = get()
     if (key in state.qualityOverrides) return state.qualityOverrides[key]
     const tier = QUALITY_TIERS[state.resolvedTier] || QUALITY_TIERS.high
     return typeof tier[key] === 'function' ? tier[key]() : tier[key]
+  },
+
+  // ── EventBus Actions ──
+  _eventBusUnsub: null,
+  _sourceStatusUnsub: null,
+
+  initEventBusSystem: () => {
+    const state = get()
+    if (state.eventBusReady) return
+
+    initEventBus()
+
+    const unsub = subscribeToBatchUpdates((diff) => {
+      set((s) => {
+        if (diff.snapshot) {
+          const map = {}
+          for (const e of diff.snapshot) map[e.id] = e
+          return { events: diff.snapshot, eventMap: map }
+        }
+
+        const nextEvents = [...s.events]
+        const nextMap = { ...s.eventMap }
+
+        if (diff.added) {
+          for (const e of diff.added) {
+            if (!nextMap[e.id]) {
+              nextEvents.push(e)
+              nextMap[e.id] = e
+            }
+          }
+        }
+
+        if (diff.updated) {
+          for (const e of diff.updated) {
+            nextMap[e.id] = e
+            const idx = nextEvents.findIndex(x => x.id === e.id)
+            if (idx !== -1) nextEvents[idx] = e
+          }
+        }
+
+        if (diff.removed) {
+          for (const id of diff.removed) {
+            delete nextMap[id]
+          }
+          const removeSet = new Set(diff.removed)
+          const filtered = nextEvents.filter(e => !removeSet.has(e.id))
+
+          const counts = { latent: 0, active: 0, critical: 0 }
+          for (const e of filtered) {
+            if (counts[e.tier] !== undefined) counts[e.tier]++
+          }
+          return { events: filtered, eventMap: nextMap, tierCounts: counts }
+        }
+
+        const counts = { latent: 0, active: 0, critical: 0 }
+        for (const e of nextEvents) {
+          if (counts[e.tier] !== undefined) counts[e.tier]++
+        }
+
+        const anomalyUpdates = diff.anomalies?.length > 0
+          ? { anomalies: [...s.anomalies, ...diff.anomalies].slice(-100) }
+          : {}
+
+        return { events: nextEvents, eventMap: nextMap, tierCounts: counts, ...anomalyUpdates }
+      })
+    })
+
+    const sourceUnsub = subscribeToSourceStatus((statuses) => {
+      set({ sourceStatuses: statuses })
+    })
+
+    set({ eventBusReady: true, _eventBusUnsub: unsub, _sourceStatusUnsub: sourceUnsub })
+
+    startFetching()
+  },
+
+  destroyEventBusSystem: () => {
+    const state = get()
+    if (state._eventBusUnsub) state._eventBusUnsub()
+    if (state._sourceStatusUnsub) state._sourceStatusUnsub()
+    stopFetching()
+    destroyEventBus()
+    set({
+      eventBusReady: false,
+      events: [],
+      eventMap: {},
+      tierCounts: { latent: 0, active: 0, critical: 0 },
+      sourceStatuses: {},
+    })
+  },
+
+  setSelectedEvent: (event) => set({ selectedEvent: event }),
+  setSeverityFloor: (v) => {
+    localStorage.setItem('atlas_severity_floor', String(v))
+    set({ severityFloor: v })
+  },
+  setFocusedEventId: (id) => set({ focusedEventId: id }),
+  clearFocus: () => set({ focusedEventId: null }),
+
+  toggleDomain: (domain) => set((s) => {
+    const next = new Set(s.activeDomains)
+    if (next.has(domain)) next.delete(domain)
+    else next.add(domain)
+    return { activeDomains: next }
+  }),
+
+  toggleColorblindMode: () => set((s) => {
+    const next = !s.colorblindMode
+    localStorage.setItem('atlas_colorblind', String(next))
+    document.body.setAttribute('data-colorblind', String(next))
+    return { colorblindMode: next }
+  }),
+
+  setMobileMode: (v) => set({ mobileMode: v }),
+  setLowBandwidthMode: (v) => set({ lowBandwidthMode: v }),
+
+  // ── Auth Actions ──
+  setUser: (user) => set({ user }),
+  setOnboardingStep: (step) => set({ onboardingStep: step }),
+
+  signOut: async () => {
+    if (supabase) await supabase.auth.signOut()
+    set({ user: null })
   },
 }))

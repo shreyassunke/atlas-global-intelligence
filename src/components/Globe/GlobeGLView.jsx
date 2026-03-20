@@ -20,7 +20,6 @@ import * as solar from 'solar-calculator'
 import { useAtlasStore } from '../../store/atlasStore'
 import { getTimezoneViewCenter } from '../../utils/geo'
 import { getCategoryColor } from '../../utils/categoryColors'
-import { MOCK_NEWS } from '../../utils/mockData'
 
 // Textures (CDN)
 const EARTH_DAY = 'https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-day.jpg'
@@ -179,10 +178,11 @@ export default function GlobeGLView({ onGlobeReady }) {
     const setSelectedMarker = useAtlasStore((s) => s.setSelectedMarker)
     const setHoveredMarker = useAtlasStore((s) => s.setHoveredMarker)
     const setZoomLevel = useAtlasStore((s) => s.setZoomLevel)
+    const resolvedTier = useAtlasStore((s) => s.resolvedTier)
+    const qualityOverrides = useAtlasStore((s) => s.qualityOverrides)
 
     const getVisibleItems = useCallback(() => {
-        const items = newsItems.length > 0 ? newsItems : MOCK_NEWS
-        return items.filter(
+        return newsItems.filter(
             (item) =>
                 item.lat != null &&
                 item.lng != null &&
@@ -219,18 +219,22 @@ export default function GlobeGLView({ onGlobeReady }) {
         camera.far = 50000
         camera.updateProjectionMatrix()
 
-        // Auto-rotate
+        // Auto-rotate — respects Settings → Features → Auto-Rotate (same as Cesium)
         const controls = globe.controls()
-        controls.autoRotate = true
+        const initialAuto = useAtlasStore.getState().getEffectiveSetting('autoRotate')
+        controls.autoRotate = initialAuto
         controls.autoRotateSpeed = 0.4
         controls.enableDamping = true
         controls.dampingFactor = 0.1
 
         const stopRotate = () => {
+            if (!useAtlasStore.getState().getEffectiveSetting('autoRotate')) return
             controls.autoRotate = false
             clearTimeout(idleTimerRef.current)
             idleTimerRef.current = setTimeout(() => {
-                if (globeRef.current) globeRef.current.controls().autoRotate = true
+                if (!globeRef.current) return
+                if (!useAtlasStore.getState().getEffectiveSetting('autoRotate')) return
+                globeRef.current.controls().autoRotate = true
             }, 6000)
         }
         container.addEventListener('pointerdown', stopRotate)
@@ -330,7 +334,7 @@ export default function GlobeGLView({ onGlobeReady }) {
             .pointLng('lng')
             .pointColor((d) => getCategoryColor(d.category))
             .pointAltitude(POINT_ALTITUDE)
-            .pointRadius(0.35)
+            .pointRadius((d) => d.mediaType === 'video' ? 0.5 : 0.35)
             .pointsMerge(false)
             .onPointClick((d) => {
                 // Open the NewsCard (same as CesiumGlobe)
@@ -415,9 +419,8 @@ export default function GlobeGLView({ onGlobeReady }) {
         useAtlasStore.getState().setOnResetView(() => {
             const center = getTimezoneViewCenter()
             globe.pointOfView({ lat: center.lat, lng: center.lng, altitude: 2.5 }, 1200)
-            // Re-enable auto-rotate and clear selection
-            const controls = globe.controls()
-            if (controls) controls.autoRotate = true
+            const c = globe.controls()
+            if (c) c.autoRotate = useAtlasStore.getState().getEffectiveSetting('autoRotate')
             useAtlasStore.getState().setSelectedMarker(null)
         })
 
@@ -453,6 +456,19 @@ export default function GlobeGLView({ onGlobeReady }) {
             }
         }
     }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Sync Auto-Rotate setting when user changes quality tier or toggles the feature
+    useEffect(() => {
+        const globe = globeRef.current
+        if (!globe) return
+        const ar = useAtlasStore.getState().getEffectiveSetting('autoRotate')
+        const controls = globe.controls()
+        if (!controls) return
+        controls.autoRotate = ar
+        if (!ar) {
+            clearTimeout(idleTimerRef.current)
+        }
+    }, [resolvedTier, qualityOverrides])
 
     // ── Update data ──
     useEffect(() => {

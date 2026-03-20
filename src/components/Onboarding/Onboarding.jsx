@@ -1,5 +1,5 @@
 import { useMemo, useEffect, useState, useRef, useCallback } from 'react'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import { useAtlasStore } from '../../store/atlasStore'
 import {
   NEWS_SOURCES,
@@ -10,7 +10,9 @@ import {
   getSourcesByRegion,
 } from '../../utils/newsSources'
 import SourceSearch from './SourceSearch'
+import AuthStep from './AuthStep'
 import { GlassFilter } from '../UI/liquid-glass'
+import { supabase } from '../../services/supabase'
 
 const ATLAS_POOLS = [
   ['ا', 'अ', 'α', 'ა', 'Ա', '아', 'አ', 'ア', '阿', 'Ā'],
@@ -27,6 +29,10 @@ export default function Onboarding({ sunAngle = 0 }) {
   const isDecodingRef = useRef(false)
   const idleTimersRef = useRef([])
 
+  const onboardingStep = useAtlasStore((s) => s.onboardingStep)
+  const setUser = useAtlasStore((s) => s.setUser)
+  const setOnboardingStep = useAtlasStore((s) => s.setOnboardingStep)
+
   const {
     selectedSources,
     addSource,
@@ -36,6 +42,17 @@ export default function Onboarding({ sunAngle = 0 }) {
     setSourceCatalog,
     setSelectedSources,
   } = useAtlasStore()
+
+  useEffect(() => {
+    if (!supabase) return
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setUser(session.user)
+        setOnboardingStep('sources')
+      }
+    })
+    return () => subscription.unsubscribe()
+  }, [setUser, setOnboardingStep])
 
   const catalog = useMemo(
     () => (sourceCatalog.length > 0 ? sourceCatalog : NEWS_SOURCES),
@@ -210,6 +227,61 @@ export default function Onboarding({ sunAngle = 0 }) {
     root.style.setProperty('--spot-x', `${x * 100}vw`)
     root.style.setProperty('--spot-y', `${y * 100}vh`)
   }, [sunAngle])
+
+  if (onboardingStep === 'auth') {
+    return (
+      <div
+        ref={lightroomRef}
+        className="relative w-full h-full min-h-0 flex flex-col items-center overflow-y-auto overflow-x-hidden bg-transparent"
+        style={{ '--spot-x': '50vw', '--spot-y': '50vh' }}
+      >
+        <GlassFilter />
+        <div className="onboarding-lightroom" aria-hidden />
+        <main className="onboarding-page relative z-10 w-full max-w-md mx-auto px-6 py-12 flex flex-col flex-1">
+          <header className="text-center mb-8">
+            <motion.div
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, ease: 'easeOut' }}
+              className="atlas-logo"
+              onMouseEnter={decodeAll}
+              role="img"
+              aria-label="ATLAS"
+            >
+              {ATLAS_REAL.map((letter, i) => (
+                <div key={i} className="atlas-letter-wrap">
+                  <span
+                    className="atlas-foreign"
+                    ref={(el) => { foreignRefs.current[i] = el }}
+                    aria-hidden
+                  >
+                    {' '}
+                  </span>
+                  <span
+                    className="atlas-letter"
+                    ref={(el) => { letterRefs.current[i] = el }}
+                    aria-hidden
+                  >
+                    {letter}
+                  </span>
+                </div>
+              ))}
+            </motion.div>
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.3, duration: 0.5 }}
+              className="mt-3 text-[9px] tracking-[0.5em] text-white/30 uppercase"
+            >
+              Global Intelligence Platform
+            </motion.p>
+            <div className="onboarding-header-rule" aria-hidden />
+          </header>
+          <AuthStep />
+        </main>
+      </div>
+    )
+  }
 
   return (
     <div

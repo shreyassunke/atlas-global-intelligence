@@ -12,7 +12,6 @@ import 'leaflet/dist/leaflet.css'
 import { useAtlasStore } from '../../store/atlasStore'
 import { getTimezoneViewCenter } from '../../utils/geo'
 import { getCategoryColor, CATEGORIES } from '../../utils/categoryColors'
-import { MOCK_NEWS } from '../../utils/mockData'
 
 // Dark tile layer matching Atlas design
 const TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
@@ -68,8 +67,7 @@ export default function FlatMap({ onGlobeReady }) {
 
     // Filter visible items
     const visibleItems = useMemo(() => {
-        const items = newsItems.length > 0 ? newsItems : MOCK_NEWS
-        return items.filter(
+        return newsItems.filter(
             (item) =>
                 item.lat != null &&
                 item.lng != null &&
@@ -119,13 +117,14 @@ export default function FlatMap({ onGlobeReady }) {
                         <CircleMarker
                             key={item.id}
                             center={[item.lat, item.lng]}
-                            radius={5}
+                            radius={item.mediaType === 'video' ? 7 : 5}
                             pathOptions={{
                                 color: color,
                                 fillColor: color,
-                                fillOpacity: 0.6,
-                                weight: 1.5,
+                                fillOpacity: item.mediaType === 'video' ? 0.8 : 0.6,
+                                weight: item.mediaType === 'video' ? 2.5 : 1.5,
                                 opacity: 0.8,
+                                dashArray: item.mediaType === 'video' ? '4 3' : undefined,
                             }}
                             eventHandlers={{
                                 click: () => setSelectedMarker(item),

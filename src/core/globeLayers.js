@@ -1,0 +1,125 @@
+export const MARITIME_CHOKEPOINTS = [
+  { name: 'Strait of Hormuz', lat: 26.6, lng: 56.3 },
+  { name: 'Suez Canal', lat: 30.0, lng: 32.3 },
+  { name: 'Taiwan Strait', lat: 24.5, lng: 120.5 },
+  { name: 'Strait of Malacca', lat: 2.5, lng: 101.8 },
+  { name: 'Bab-el-Mandeb', lat: 12.6, lng: 43.3 },
+  { name: 'Bosphorus', lat: 41.1, lng: 29.0 },
+  { name: 'South China Sea', lat: 15.0, lng: 115.0 },
+  { name: 'Denmark Strait', lat: 66.0, lng: -27.0 },
+]
+
+export const NUCLEAR_FACILITIES = [
+  { name: 'Zaporizhzhia', lat: 47.51, lng: 34.59, country: 'UA' },
+  { name: 'Fukushima Daiichi', lat: 37.42, lng: 141.03, country: 'JP' },
+  { name: 'Chernobyl', lat: 51.39, lng: 30.10, country: 'UA' },
+  { name: 'Sellafield', lat: 54.42, lng: -3.50, country: 'GB' },
+  { name: 'La Hague', lat: 49.68, lng: -1.88, country: 'FR' },
+  { name: 'Hanford', lat: 46.55, lng: -119.49, country: 'US' },
+  { name: 'Natanz', lat: 33.72, lng: 51.73, country: 'IR' },
+  { name: 'Yongbyon', lat: 39.80, lng: 125.75, country: 'KP' },
+  { name: 'Dimona', lat: 31.00, lng: 35.15, country: 'IL' },
+  { name: 'Bushehr', lat: 28.83, lng: 50.89, country: 'IR' },
+  { name: 'Koodankulam', lat: 8.17, lng: 77.71, country: 'IN' },
+  { name: 'Barakah', lat: 23.96, lng: 52.26, country: 'AE' },
+  { name: 'Hinkley Point C', lat: 51.21, lng: -3.13, country: 'GB' },
+  { name: 'Vogtle', lat: 33.14, lng: -81.76, country: 'US' },
+  { name: 'Taishan', lat: 21.92, lng: 112.98, country: 'CN' },
+]
+
+export const SUBMARINE_CABLE_PATHS = [
+  { name: 'Transatlantic', points: [[-73.9, 40.7], [-5.5, 50.1]] },
+  { name: 'Trans-Pacific N', points: [[-122.4, 37.8], [139.7, 35.7]] },
+  { name: 'Trans-Pacific S', points: [[-118.2, 34.0], [151.2, -33.9]] },
+  { name: 'Europe-Asia', points: [[-5.5, 36.0], [32.3, 30.0], [43.3, 12.6], [56.3, 26.6], [72.8, 21.0], [80.2, 13.1], [101.8, 2.5], [103.8, 1.3]] },
+  { name: 'US-SA', points: [[-73.9, 40.7], [-43.2, -22.9]] },
+  { name: 'Africa-India', points: [[-18.5, 14.7], [39.3, -6.8], [72.8, 19.1]] },
+]
+
+export const ARC_TYPES = {
+  CORRELATION: 'correlation',
+  TRAJECTORY: 'trajectory',
+  BLACKOUT: 'blackout',
+}
+
+export const ARC_LIMIT = 15
+
+export function clusterEvents(events, radiusKm = 200, minClusterSize = 5) {
+  const clusters = []
+  const assigned = new Set()
+
+  const sorted = [...events].sort((a, b) => b.severity - a.severity)
+
+  for (const evt of sorted) {
+    if (assigned.has(evt.id)) continue
+
+    const cluster = [evt]
+    assigned.add(evt.id)
+
+    for (const other of sorted) {
+      if (assigned.has(other.id)) continue
+      if (other.tier !== evt.tier) continue
+      const dist = haversineKm(evt.lat, evt.lng, other.lat, other.lng)
+      if (dist <= radiusKm) {
+        cluster.push(other)
+        assigned.add(other.id)
+      }
+    }
+
+    if (cluster.length >= minClusterSize) {
+      let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180
+      let sumLat = 0, sumLng = 0
+
+      for (const e of cluster) {
+        sumLat += e.lat
+        sumLng += e.lng
+        if (e.lat < minLat) minLat = e.lat
+        if (e.lat > maxLat) maxLat = e.lat
+        if (e.lng < minLng) minLng = e.lng
+        if (e.lng > maxLng) maxLng = e.lng
+      }
+
+      clusters.push({
+        centroid: { lat: sumLat / cluster.length, lng: sumLng / cluster.length },
+        bounds: { minLat, maxLat, minLng, maxLng },
+        tier: evt.tier,
+        count: cluster.length,
+        maxSeverity: Math.max(...cluster.map(e => e.severity)),
+        events: cluster,
+      })
+    }
+  }
+
+  return clusters
+}
+
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const R = 6371
+  const toRad = d => d * Math.PI / 180
+  const dLat = toRad(lat2 - lat1)
+  const dLng = toRad(lng2 - lng1)
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+export function buildCorrelationArcs(anomalies, eventMap) {
+  const arcs = []
+
+  for (const anomaly of anomalies) {
+    if (anomaly.type === 'CHOKEPOINT_COMPOSITE') {
+      const e1 = eventMap[anomaly.conflictEventId]
+      const e2 = eventMap[anomaly.economicEventId]
+      if (e1 && e2) {
+        arcs.push({
+          type: ARC_TYPES.CORRELATION,
+          from: { lat: e1.lat, lng: e1.lng },
+          to: { lat: e2.lat, lng: e2.lng },
+          tier: 'critical',
+          label: `Chokepoint: ${anomaly.chokepoint}`,
+        })
+      }
+    }
+  }
+
+  return arcs.slice(0, ARC_LIMIT)
+}

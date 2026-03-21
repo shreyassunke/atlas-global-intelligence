@@ -227,6 +227,21 @@ body,
   font-family: "Courier Prime", "JetBrains Mono", monospace;
 }
 
+/* Auth step — optional soft focus (confirmation only); main form is borderless in JSX */
+.auth-step-card {
+  border-radius: 16px;
+  border: none;
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: none;
+}
+
+/* Minimal login stack — Rajdhani, no grid boxes */
+.auth-step-minimal {
+  font-family: var(--font-ui);
+}
+
 .onboarding-logo {
   font-family: "Bebas Neue", sans-serif;
   font-size: clamp(3.5rem, 10vw, 6rem);
@@ -1254,6 +1269,11 @@ body,
 
 /* Dropdown menu */
 /* z-index must stay below .hud-header (40) so overflow menus paint above Mission Time clock (z-[35]) */
+.hud-user-dropdown {
+  width: min(260px, calc(100vw - 24px));
+  max-width: min(260px, calc(100vw - 24px));
+}
+
 .hud-dropdown {
   position: absolute;
   top: calc(100% + 6px);

@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAtlasStore } from '../../store/atlasStore'
 import SourceSearch from '../Onboarding/SourceSearch'
+import HeaderUserMenu from './HeaderUserMenu'
 
 const IconFilter = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -184,6 +185,8 @@ export default function Header({ hudHidden = false, onToggleHud, onToggleSources
           >
             <IconSettings />
           </button>
+
+          <HeaderUserMenu />
 
           <div className="hud-separator" />
 

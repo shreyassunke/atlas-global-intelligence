@@ -19,7 +19,7 @@ export const LANDING_GLOBE_MARKERS = [
     lng: 8.5417,
     category: 'environment_climate',
     title: 'Encrypted uplink',
-    body: 'Your session and provider keys stay on your device — connect sources securely through TATVA.',
+    body: 'Your session and provider keys stay on your device — connect sources securely through ATLAS.',
   },
   {
     id: 'feat-api',
@@ -28,7 +28,7 @@ export const LANDING_GLOBE_MARKERS = [
     lng: 103.8198,
     category: 'arts_music',
     title: 'Global API',
-    body: 'Wire in news APIs and feeds you control; TATVA visualizes what you choose to ingest.',
+    body: 'Wire in news APIs and feeds you control; ATLAS visualizes what you choose to ingest.',
   },
   {
     id: 'uc-journalists',
@@ -38,7 +38,7 @@ export const LANDING_GLOBE_MARKERS = [
     category: 'investigations',
     title: 'Journalists',
     body:
-      'Cross-check breaking stories against geography and feed provenance so you can move fast without losing context. TATVA keeps your workspace in one place — globe, sources, and alerts.',
+      'Cross-check breaking stories against geography and feed provenance so you can move fast without losing context. ATLAS keeps your workspace in one place — globe, sources, and alerts.',
     stat: 'Monitor 40+ live feeds across 6 continents',
   },
   {

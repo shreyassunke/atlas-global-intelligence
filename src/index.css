@@ -229,6 +229,28 @@ body,
   font-family: "Courier Prime", "JetBrains Mono", monospace;
 }
 
+/* Auth + sources: logo row matches full-width wordmark (glitch slots + centered mark) */
+.onboarding-page .atlas-logo.atlas-logo--modern {
+  width: 100%;
+  max-width: min(42rem, 100%);
+  margin-inline: auto;
+  justify-content: center;
+  transform: none;
+  filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.18)) drop-shadow(0 0 28px rgba(96, 165, 250, 0.12));
+}
+
+.onboarding-page .atlas-logo-slot-modern {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 4.5rem;
+}
+
+.onboarding-page .atlas-logo-full-wordmark .atlas-wordmark-svg {
+  height: clamp(3.75rem, 10.5vw, 7.75rem);
+  width: auto;
+  max-width: min(90vw, 40rem);
+}
+
 /* Auth step — optional soft focus (confirmation only); main form is borderless in JSX */
 .auth-step-card {
   border-radius: 16px;
@@ -254,7 +276,7 @@ body,
   text-shadow: 2px 3px 0 rgba(0, 0, 0, 0.9), 3px 6px 16px rgba(0, 0, 0, 0.6);
 }
 
-/* TATVA / logo — letter glitch / decode */
+/* ATLAS / logo — letter glitch / decode */
 .atlas-logo {
   display: inline-flex;
   align-items: flex-end;
@@ -314,11 +336,12 @@ body,
   transition: transform 0.4s cubic-bezier(0.23, 1, 0.32, 1), color 0.6s ease, text-shadow 0.6s ease;
 }
 
-/* SVG wordmark + onboarding glitch slots */
+/* SVG wordmark + onboarding glitch slots — glow lives on `.atlas-wordmark-img--glow`, not the whole hit area */
 .atlas-logo.atlas-logo--modern {
+  position: relative;
   gap: 0.28rem;
   transform: translateX(0.06em);
-  filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.2)) drop-shadow(0 0 22px rgba(96, 165, 250, 0.1));
+  filter: none;
 }
 
 .atlas-logo-slot-modern {
@@ -327,6 +350,7 @@ body,
   flex-direction: column;
   align-items: center;
   justify-content: flex-end;
+  min-width: clamp(1rem, 4.5vw, 2.1rem);
 }
 
 .atlas-logo-slot-modern .atlas-letter-mark {
@@ -337,10 +361,27 @@ body,
   justify-content: center;
 }
 
-.atlas-letter-mark--onboarding .atlas-wordmark-slot-svg {
+.atlas-logo-full-wordmark {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.atlas-logo-full-wordmark .atlas-wordmark-svg {
   display: block;
   height: clamp(3.1rem, 13.5vw, 6.5rem);
   width: auto;
+  max-width: min(92vw, 22rem);
+}
+
+.atlas-logo--modern:has(.atlas-letter-glitch:not(:empty)) .atlas-logo-full-wordmark {
+  visibility: hidden;
 }
 
 .atlas-letter-glitch {
@@ -372,9 +413,85 @@ body,
 .atlas-wordmark-svg {
   display: block;
   max-width: 100%;
+  background: transparent;
+  object-fit: contain;
 }
 
-/* TATVA wordmark — HUD header (SVG) */
+/* Starfield / HUD: soft “space age” glow on the letters only (no plate — transparent SVG) */
+.atlas-wordmark-img--glow {
+  filter:
+    drop-shadow(0 0 1px rgba(255, 255, 255, 0.65))
+    drop-shadow(0 0 10px rgba(186, 230, 253, 0.42))
+    drop-shadow(0 0 28px rgba(56, 189, 248, 0.28))
+    drop-shadow(0 0 48px rgba(59, 130, 246, 0.12));
+}
+
+.stitch-nav-logo .atlas-wordmark-svg {
+  background: transparent;
+}
+
+/* ── Landing wordmark: larger, relaxed horizontal rhythm, soft edge halation ── */
+.stitch-landing .atlas-wordmark--landing {
+  display: block;
+  height: clamp(34px, 6.2vw, 54px);
+  width: auto !important;
+  max-height: 54px;
+  max-width: min(72vw, 320px);
+  object-fit: contain;
+  transform: scaleX(1.06);
+  transform-origin: left center;
+}
+
+@media (min-width: 640px) {
+  .stitch-landing .atlas-wordmark--landing {
+    height: clamp(38px, 5.2vw, 56px);
+    max-height: 56px;
+    transform: scaleX(1.09);
+  }
+}
+
+@media (min-width: 1024px) {
+  .stitch-landing .atlas-wordmark--landing {
+    height: clamp(40px, 3.85vw, 58px);
+    max-height: 58px;
+    transform: scaleX(1.1);
+  }
+}
+
+/* Softer, rounder feel: tight inner halos (approximates smoother terminals on a raster/flat SVG) */
+.stitch-landing .atlas-wordmark--landing.atlas-wordmark-img--glow {
+  filter:
+    drop-shadow(0 0 1.35px rgba(248, 250, 252, 0.82))
+    drop-shadow(0 0 2.5px rgba(248, 250, 252, 0.55))
+    drop-shadow(0 0 1px rgba(255, 255, 255, 0.38))
+    drop-shadow(0 0 16px rgba(186, 230, 253, 0.52))
+    drop-shadow(0 0 40px rgba(56, 189, 248, 0.26));
+}
+
+.stitch-footer .atlas-wordmark--landing-footer {
+  height: clamp(26px, 4.5vw, 36px) !important;
+  max-height: 36px;
+  max-width: min(58vw, 240px);
+  transform: scaleX(1.07);
+  transform-origin: center center;
+}
+
+.stitch-footer .atlas-wordmark--landing-footer.atlas-wordmark-img--glow {
+  filter:
+    drop-shadow(0 0 1px rgba(248, 250, 252, 0.72))
+    drop-shadow(0 0 2px rgba(248, 250, 252, 0.45))
+    drop-shadow(0 0 12px rgba(186, 230, 253, 0.42))
+    drop-shadow(0 0 30px rgba(56, 189, 248, 0.18));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stitch-landing .atlas-wordmark--landing,
+  .stitch-footer .atlas-wordmark--landing-footer {
+    transform: none;
+  }
+}
+
+/* HUD header (logo) */
 .atlas-logo-header {
   display: inline-flex;
   align-items: center;
@@ -1188,7 +1305,7 @@ button.atlas-logo-header-btn:focus-visible {
   color: rgba(255, 255, 255, 0.85);
 }
 
-/* ── TATVA v4 — Unified Header Bar ── */
+/* ── ATLAS v4 — Unified Header Bar ── */
 
 /* Three columns: equal flex sides pin the tier pills to true viewport center */
 .hud-header {
@@ -1751,7 +1868,7 @@ button.atlas-logo-header-btn:focus-visible {
   pointer-events: auto;
 }
 
-/* ── TATVA v4 — Event System ── */
+/* ── ATLAS v4 — Event System ── */
 
 .tier-shape {
   width: 8px;

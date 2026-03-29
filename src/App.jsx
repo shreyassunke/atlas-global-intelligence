@@ -94,7 +94,7 @@ export default function App() {
 
   const showLandingLayer = !landingAcknowledged && !isSpotifyOAuthReturn
 
-  /** Intro + ambient BGM only on the main TATVA tool (globe), not landing, setup, or transition */
+  /** Intro + ambient BGM only on the main ATLAS tool (globe), not landing, setup, or transition */
   const bgmToolSurfaceActive =
     !showLandingLayer && !launchTransitionActive && hasCompletedOnboarding
 

@@ -159,8 +159,8 @@ export default function Header({ hudHidden = false, onToggleHud, onToggleSources
             <button
               type="button"
               className="atlas-logo-header atlas-logo-header-btn"
-              aria-label="TATVA — open introduction"
-              title="Open TATVA introduction"
+              aria-label="ATLAS — open introduction"
+              title="Open ATLAS introduction"
               onClick={() => reopenLanding()}
             >
               <AtlasWordmark height={22} className="atlas-wordmark--header" aria-hidden />

@@ -61,7 +61,7 @@ export default function LandingPage() {
       exit={{ opacity: 0 }}
       transition={{ duration: 0.4 }}
       role="document"
-      aria-label="TATVA introduction"
+      aria-label="ATLAS introduction"
     >
       <div ref={navTopSentinelRef} className="stitch-nav-scroll-sentinel" aria-hidden />
       <GlassFilter />
@@ -80,9 +80,9 @@ export default function LandingPage() {
             type="button"
             className="stitch-nav-logo flex items-center shrink-0 border-0 bg-transparent p-0 cursor-pointer text-inherit justify-self-start"
             onClick={scrollLandingTop}
-            aria-label="TATVA — top of page"
+            aria-label="ATLAS — top of page"
           >
-            <AtlasWordmark height={20} className="w-auto opacity-[0.98]" aria-hidden />
+            <AtlasWordmark className="atlas-wordmark--landing w-auto opacity-[0.98]" aria-hidden />
           </button>
           <div className="stitch-nav-bar__links stitch-nav-bar__links--desktop">
             {LANDING_NAV.map(({ id, label }) => (
@@ -135,7 +135,7 @@ export default function LandingPage() {
               className="mt-4 text-[#9ca3af] text-sm sm:text-base leading-relaxed font-[family-name:var(--font-ui)] max-w-prose mx-auto lg:mx-0"
             >
               Open-source intel on a living globe — then dive into setup and your feeds. Spin the globe and click the
-              markers to discover features and who TATVA is for.
+              markers to discover features and who ATLAS is for.
             </motion.p>
             <motion.div
               custom={3}
@@ -192,9 +192,12 @@ export default function LandingPage() {
               type="button"
               className="stitch-footer__brand flex items-center border-0 bg-transparent p-0 cursor-pointer text-inherit shrink-0"
               onClick={scrollLandingTop}
-              aria-label="TATVA — top of page"
+              aria-label="ATLAS — top of page"
             >
-              <AtlasWordmark height={17} className="w-auto opacity-90" aria-hidden />
+              <AtlasWordmark
+                className="atlas-wordmark--landing atlas-wordmark--landing-footer w-auto opacity-90"
+                aria-hidden
+              />
             </button>
             <nav className="stitch-footer__links" aria-label="Footer">
               <button type="button" onClick={() => scrollTo('cta-join')} className="stitch-footer-link">

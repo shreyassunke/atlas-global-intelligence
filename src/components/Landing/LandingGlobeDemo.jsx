@@ -334,7 +334,7 @@ export default function LandingGlobeDemo({ immersive = false }) {
   return (
     <div
       className={immersive ? 'landing-globe-demo landing-globe-demo--immersive' : 'stitch-globe-stage landing-globe-demo'}
-      aria-label="Interactive preview of the TATVA globe: drag to rotate, click markers for features and use cases"
+      aria-label="Interactive preview of the ATLAS globe: drag to rotate, click markers for features and use cases"
     >
       {!immersive ? (
         <>

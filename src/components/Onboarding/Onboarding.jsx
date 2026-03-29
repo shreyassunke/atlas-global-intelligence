@@ -12,18 +12,18 @@ import {
 import SourceSearch from './SourceSearch'
 import AuthStep from './AuthStep'
 import { GlassFilter } from '../UI/liquid-glass'
-import { AtlasWordmarkSlot } from '../UI/AtlasWordmark'
+import { AtlasWordmark } from '../UI/AtlasWordmark'
 import { supabase } from '../../services/supabase'
 
-/** Glitch pools per letter: T A T V A */
-const TATVA_POOLS = [
+/** Glitch pools per letter: A T L A S */
+const ATLAS_POOLS = [
+  ['ا', 'अ', 'α', 'ა', 'Ա', '아', '𝐀', 'ᴀ', 'ア', 'À'],
   ['ت', 'τ', 'Т', 'ט', 'ട', 'テ', 'T', 'Տ', 'ທ', 'ཐ'],
-  ['ا', 'अ', 'α', 'ა', 'Ա', '아', 'አ', 'ア', '阿', 'À'],
-  ['ت', 'τ', 'Т', 'ט', 'ട', 'テ', 'T', 'Տ', 'ທ', 'ཐ'],
-  ['ν', 'व', 'Λ', 'ვ', 'V', 'ヴ', 'Ṽ', 'Ỽ', '۷', 'Ⅴ'],
-  ['ا', 'अ', 'α', 'ა', 'Ա', '아', 'አ', 'ア', '阿', 'À'],
+  ['λ', 'Ł', 'Ĺ', 'Ḷ', 'Ⅼ', 'ℓ', 'L', 'Ｌ', 'ʟ'],
+  ['ا', 'अ', 'α', 'ა', 'Ա', '아', '𝐀', 'ᴀ', 'ア', 'À'],
+  ['σ', 'ʃ', 'Σ', 'ⓢ', '𝔖', 'S', 'Ｓ', 'ᔑ', '𐑈'],
 ]
-const TATVA_REAL = ['T', 'A', 'T', 'V', 'A']
+const ATLAS_REAL = ['A', 'T', 'L', 'A', 'S']
 
 export default function Onboarding({ sunAngle = 0 }) {
   const letterRefs = useRef([])
@@ -113,7 +113,7 @@ export default function Onboarding({ sunAngle = 0 }) {
   const showForeign = useCallback((i) => {
     const el = foreignRefs.current[i]
     if (el) {
-      el.textContent = rand(TATVA_POOLS[i])
+      el.textContent = rand(ATLAS_POOLS[i])
       el.classList.add('visible')
     }
   }, [rand])
@@ -136,8 +136,8 @@ export default function Onboarding({ sunAngle = 0 }) {
           const letterEl = letterRefs.current[i]
           const foreignEl = foreignRefs.current[i]
           if (letterEl) letterEl.style.transform = `translateX(-50%) translateY(${yShift}px)`
-          if (letterEl) letterEl.textContent = rand(TATVA_POOLS[i])
-          if (foreignEl) foreignEl.textContent = rand(TATVA_POOLS[i])
+          if (letterEl) letterEl.textContent = rand(ATLAS_POOLS[i])
+          if (foreignEl) foreignEl.textContent = rand(ATLAS_POOLS[i])
           if (elapsed >= duration) {
             clearInterval(t)
             if (letterEl) {
@@ -161,11 +161,11 @@ export default function Onboarding({ sunAngle = 0 }) {
     isDecodingRef.current = true
     idleTimersRef.current.forEach(clearTimeout)
     idleTimersRef.current = []
-    TATVA_REAL.forEach((_, i) => {
+    ATLAS_REAL.forEach((_, i) => {
       const letterEl = letterRefs.current[i]
-      if (letterEl) letterEl.textContent = rand(TATVA_POOLS[i])
+      if (letterEl) letterEl.textContent = rand(ATLAS_POOLS[i])
     })
-    Promise.all(TATVA_REAL.map((_, i) => scrambleLetter(i, 360, i * 65))).then(() => {
+    Promise.all(ATLAS_REAL.map((_, i) => scrambleLetter(i, 360, i * 65))).then(() => {
       setTimeout(() => {
         isDecodingRef.current = false
         restartIdleGlitches()
@@ -175,15 +175,15 @@ export default function Onboarding({ sunAngle = 0 }) {
 
   const temptGlitch = useCallback(() => {
     if (isDecodingRef.current) return
-    const i = Math.floor(Math.random() * TATVA_REAL.length)
+    const i = Math.floor(Math.random() * ATLAS_REAL.length)
     const flickers = Math.floor(Math.random() * 2) + 2
     let f = 0
     showForeign(i)
     const t = setInterval(() => {
       const letterEl = letterRefs.current[i]
       const foreignEl = foreignRefs.current[i]
-      if (letterEl) letterEl.textContent = rand(TATVA_POOLS[i])
-      if (foreignEl) foreignEl.textContent = rand(TATVA_POOLS[i])
+      if (letterEl) letterEl.textContent = rand(ATLAS_POOLS[i])
+      if (foreignEl) foreignEl.textContent = rand(ATLAS_POOLS[i])
       if (letterEl) {
         letterEl.style.transform =
           f % 2 === 0 ? 'translateX(-50%) translateY(-2px)' : 'translateX(-50%) translateY(0)'
@@ -238,55 +238,57 @@ export default function Onboarding({ sunAngle = 0 }) {
     return (
       <div
         ref={lightroomRef}
-        className="relative w-full h-full min-h-0 flex flex-col items-center overflow-y-auto overflow-x-hidden bg-transparent"
+        className="onboarding-shell relative w-full h-full min-h-0 min-h-[100dvh] flex flex-col items-stretch overflow-y-auto overflow-x-hidden bg-transparent"
         style={{ '--spot-x': '50vw', '--spot-y': '50vh' }}
       >
         <GlassFilter />
         <div className="onboarding-lightroom" aria-hidden />
-        <main className="onboarding-page relative z-10 w-full max-w-md mx-auto px-6 py-12 flex flex-col flex-1">
-          <header className="text-center mb-8">
-            <motion.button
-              type="button"
-              initial={{ opacity: 0, y: -20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, ease: 'easeOut' }}
-              className="atlas-logo atlas-logo--modern border-0 bg-transparent p-0 cursor-pointer text-inherit"
-              onMouseEnter={decodeAll}
-              onTouchStart={decodeAll}
-              onClick={reopenLanding}
-              aria-label="TATVA — open introduction"
-            >
-              {TATVA_REAL.map((_, i) => (
-                <div key={i} className="atlas-letter-wrap atlas-logo-slot-modern">
-                  <span
-                    className="atlas-foreign"
-                    ref={(el) => { foreignRefs.current[i] = el }}
-                    aria-hidden
-                  >
-                    {' '}
-                  </span>
-                  <span
-                    className="atlas-letter-glitch"
-                    ref={(el) => { letterRefs.current[i] = el }}
-                    aria-hidden
-                  />
-                  <span className="atlas-letter-mark atlas-letter-mark--onboarding" aria-hidden>
-                    <AtlasWordmarkSlot index={i} withGlow={false} />
-                  </span>
-                </div>
-              ))}
-            </motion.button>
-            <motion.p
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.3, duration: 0.5 }}
-              className="mt-3 text-[9px] tracking-[0.5em] text-white/30 uppercase"
-            >
-              Global Intelligence Platform
-            </motion.p>
-            <div className="onboarding-header-rule" aria-hidden />
-          </header>
-          <AuthStep />
+        <main className="onboarding-page onboarding-page--auth relative z-10 w-full flex flex-col flex-1 min-h-0 px-6 sm:px-10 pt-[max(1.5rem,env(safe-area-inset-top,0px)+0.75rem)] pb-[max(2rem,env(safe-area-inset-bottom,0px)+1rem)]">
+          <div className="w-full max-w-xl mx-auto flex flex-col gap-10 my-auto shrink-0">
+            <header className="text-center">
+              <motion.button
+                type="button"
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.6, ease: 'easeOut' }}
+                className="atlas-logo atlas-logo--modern border-0 bg-transparent p-0 cursor-pointer text-inherit"
+                onMouseEnter={decodeAll}
+                onTouchStart={decodeAll}
+                onClick={reopenLanding}
+                aria-label="ATLAS — open introduction"
+              >
+                {ATLAS_REAL.map((_, i) => (
+                  <div key={i} className="atlas-letter-wrap atlas-logo-slot-modern">
+                    <span
+                      className="atlas-foreign"
+                      ref={(el) => { foreignRefs.current[i] = el }}
+                      aria-hidden
+                    >
+                      {' '}
+                    </span>
+                    <span
+                      className="atlas-letter-glitch"
+                      ref={(el) => { letterRefs.current[i] = el }}
+                      aria-hidden
+                    />
+                  </div>
+                ))}
+                <span className="atlas-logo-full-wordmark" aria-hidden>
+                  <AtlasWordmark withGlow={false} />
+                </span>
+              </motion.button>
+              <motion.p
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.3, duration: 0.5 }}
+                className="mt-3 text-[10px] sm:text-[11px] tracking-[0.5em] text-white/30 uppercase"
+              >
+                Global Intelligence Platform
+              </motion.p>
+              <div className="onboarding-header-rule" aria-hidden />
+            </header>
+            <AuthStep />
+          </div>
         </main>
       </div>
     )
@@ -295,27 +297,27 @@ export default function Onboarding({ sunAngle = 0 }) {
   return (
     <div
       ref={lightroomRef}
-      className="relative w-full h-full min-h-0 flex flex-col items-center overflow-y-auto overflow-x-hidden bg-transparent"
+      className="onboarding-shell relative w-full h-full min-h-0 min-h-[100dvh] flex flex-col items-stretch overflow-y-auto overflow-x-hidden bg-transparent"
       style={{ '--spot-x': '50vw', '--spot-y': '50vh' }}
     >
       <GlassFilter />
       <div className="onboarding-lightroom" aria-hidden />
 
-      <main className="onboarding-page relative z-10 w-full max-w-3xl mx-auto px-6 sm:px-10 py-12 sm:py-16 pb-24 flex flex-col flex-shrink-0">
-        {/* Header — TATVA logo with glitch/decode animation */}
-        <header className="text-center mb-12">
+      <main className="onboarding-page onboarding-page--setup relative z-10 w-full max-w-5xl mx-auto px-6 sm:px-10 lg:px-12 flex flex-col flex-1 min-h-0 pt-[max(2.75rem,env(safe-area-inset-top,0px)+1.75rem)] sm:pt-[max(3.25rem,env(safe-area-inset-top,0px)+2.25rem)] pb-[max(7rem,env(safe-area-inset-bottom,0px)+3rem)]">
+        {/* Header — ATLAS logo with glitch/decode animation */}
+        <header className="text-center mb-10 sm:mb-12 shrink-0">
           <motion.button
             type="button"
-            initial={{ opacity: 0, y: -20 }}
+            initial={{ opacity: 0, y: -8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, ease: 'easeOut' }}
             className="atlas-logo atlas-logo--modern border-0 bg-transparent p-0 cursor-pointer text-inherit"
             onMouseEnter={decodeAll}
             onTouchStart={decodeAll}
             onClick={reopenLanding}
-            aria-label="TATVA — open introduction"
+            aria-label="ATLAS — open introduction"
           >
-            {TATVA_REAL.map((_, i) => (
+            {ATLAS_REAL.map((_, i) => (
               <div key={i} className="atlas-letter-wrap atlas-logo-slot-modern">
                 <span
                   className="atlas-foreign"
@@ -329,17 +331,17 @@ export default function Onboarding({ sunAngle = 0 }) {
                   ref={(el) => { letterRefs.current[i] = el }}
                   aria-hidden
                 />
-                <span className="atlas-letter-mark atlas-letter-mark--onboarding" aria-hidden>
-                  <AtlasWordmarkSlot index={i} withGlow={false} />
-                </span>
               </div>
             ))}
+            <span className="atlas-logo-full-wordmark" aria-hidden>
+              <AtlasWordmark withGlow={false} />
+            </span>
           </motion.button>
           <motion.p
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.3, duration: 0.5 }}
-            className="mt-3 text-[9px] tracking-[0.5em] text-white/30 uppercase"
+            className="mt-3 text-[10px] sm:text-[11px] tracking-[0.5em] text-white/30 uppercase"
           >
             Configure your intelligence feeds
           </motion.p>

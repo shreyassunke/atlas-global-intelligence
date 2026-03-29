@@ -7,9 +7,10 @@
  * tracks the real solar position, matching CesiumJS's sun appearance.
  *
  * Map context (closer to Cesium): Natural Earth country + state/province
- * outlines (paths layer), and Carto `light_only_labels` raster tiles
- * (second SlippyMap shell) for place/country typography. District-level
- * vector boundaries are omitted by default (very heavy GeoJSON).
+ * outlines (paths layer, black strokes with alpha like Cesium), and Carto
+ * `light_only_labels` raster tiles (SlippyMap) with higher max zoom on
+ * high tiers so smaller places appear when zoomed in. District-level
+ * vector boundaries stay omitted (very heavy GeoJSON).
  *
  * Day/night cycle reference: https://globe.gl/example/day-night-cycle/
  */
@@ -41,11 +42,19 @@ const BG_IMG = 'https://cdn.jsdelivr.net/npm/three-globe/example/img/night-sky.p
 const CARTO_LABEL_TILE_URL = (x, y, l) =>
     `https://basemaps.cartocdn.com/light_only_labels/${l}/${x}/${y}@2x.png`
 
-/** Natural Earth — country / first-order admin lines (same sources as Cesium) */
-const NE_ADMIN0_LINES =
+/** Natural Earth — boundary lines (same family as Cesium; resolution scales with tier) */
+const NE_ADMIN0_110M =
     'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_boundary_lines_land.geojson'
-const NE_ADMIN1_LINES =
+const NE_ADMIN0_50M =
+    'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_admin_0_boundary_lines_land.geojson'
+const NE_ADMIN1_50M =
     'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_admin_1_states_provinces_lines.geojson'
+const NE_ADMIN1_10M =
+    'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_admin_1_states_provinces_lines.geojson'
+
+/** CesiumGlobe parity: black strokes with alpha + relative widths (mapped to FatLine px) */
+const STROKE_COUNTRY = { color: 'rgba(0, 0, 0, 0.25)', strokePx: 1.35 }
+const STROKE_STATE = { color: 'rgba(0, 0, 0, 0.15)', strokePx: 0.85 }
 
 const POINT_ALTITUDE = 0.01
 const RING_MAX_RADIUS = 3
@@ -186,22 +195,90 @@ function sunPosAt(dt) {
 }
 
 /**
- * GeoJSON LineString / MultiLineString → globe.gl paths ({ coords: [lat,lng][] }).
+ * Lat/lng pairs as [lat, lng] — unit vectors on the globe (y-up, same as three-globe).
+ */
+function latLngToUnitVec(lat, lng) {
+    const phi = (90 - lat) * (Math.PI / 180)
+    const theta = (90 - lng) * (Math.PI / 180)
+    const x = Math.sin(phi) * Math.cos(theta)
+    const y = Math.cos(phi)
+    const z = Math.sin(phi) * Math.sin(theta)
+    const len = Math.hypot(x, y, z) || 1
+    return { x: x / len, y: y / len, z: z / len }
+}
+
+function unitVecToLatLng(v) {
+    const { x, y, z } = v
+    const r = Math.hypot(x, y, z) || 1
+    const yn = y / r
+    const phi = Math.acos(Math.max(-1, Math.min(1, yn)))
+    const lat = 90 - (phi * 180) / Math.PI
+    const theta = Math.atan2(z, x)
+    let lng = 90 - (theta * 180) / Math.PI
+    while (lng > 180) lng -= 360
+    while (lng < -180) lng += 360
+    return [lat, lng]
+}
+
+function greatCircleSlerp(a, b, t) {
+    const dot = Math.max(-1, Math.min(1, a.x * b.x + a.y * b.y + a.z * b.z))
+    const omega = Math.acos(dot)
+    if (omega < 1e-7) return { x: a.x, y: a.y, z: a.z }
+    const s0 = Math.sin((1 - t) * omega) / Math.sin(omega)
+    const s1 = Math.sin(t * omega) / Math.sin(omega)
+    return {
+        x: s0 * a.x + s1 * b.x,
+        y: s0 * a.y + s1 * b.y,
+        z: s0 * a.z + s1 * b.z,
+    }
+}
+
+/**
+ * Insert points along great-circle arcs so long GeoJSON edges don't look like
+ * flat rhumb cuts on the sphere (reduces the “hand-painted” segmented look).
+ */
+function densifyLatLngAlongGreatCircle(latLngCoords, maxCentralDeg = 1.15) {
+    if (!latLngCoords?.length) return latLngCoords
+    const out = []
+    for (let i = 0; i < latLngCoords.length; i++) {
+        out.push(latLngCoords[i])
+        if (i >= latLngCoords.length - 1) break
+        const [latA, lngA] = latLngCoords[i]
+        const [latB, lngB] = latLngCoords[i + 1]
+        const va = latLngToUnitVec(latA, lngA)
+        const vb = latLngToUnitVec(latB, lngB)
+        const dot = Math.max(-1, Math.min(1, va.x * vb.x + va.y * vb.y + va.z * vb.z))
+        const centralDeg = (Math.acos(dot) * 180) / Math.PI
+        const n = Math.max(0, Math.ceil(centralDeg / maxCentralDeg) - 1)
+        for (let k = 1; k <= n; k++) {
+            const t = k / (n + 1)
+            const w = greatCircleSlerp(va, vb, t)
+            out.push(unitVecToLatLng(w))
+        }
+    }
+    return out
+}
+
+/**
+ * GeoJSON LineString / MultiLineString / GeometryCollection → globe.gl paths.
  * GeoJSON uses [lng, lat]; three-globe paths use [lat, lng] per point.
  */
-function geoJsonLineFeaturesToPaths(geojson, color) {
+function geoJsonLineFeaturesToPaths(geojson, color, strokePx) {
     const out = []
     const pushLine = (lineCoords) => {
         if (!lineCoords?.length) return
-        const coords = lineCoords.map(([lng, lat]) => [lat, lng])
+        const mapped = lineCoords.map(([lng, lat]) => [lat, lng])
+        const coords = densifyLatLngAlongGreatCircle(mapped, 1.1)
         if (coords.length < 2) return
-        out.push({ coords, color })
+        out.push({ coords, color, stroke: strokePx })
     }
     const handleGeom = (geom) => {
         if (!geom) return
         if (geom.type === 'LineString') pushLine(geom.coordinates)
         else if (geom.type === 'MultiLineString') {
             for (const line of geom.coordinates) pushLine(line)
+        } else if (geom.type === 'GeometryCollection') {
+            for (const g of geom.geometries ?? []) handleGeom(g)
         }
     }
     if (geojson.type === 'FeatureCollection') {
@@ -249,9 +326,11 @@ export default function GlobeGLView({ onGlobeReady }) {
         const homeView = getTimezoneViewCenter()
 
         // Size immediately
+        const initW = container.clientWidth
+        const initH = container.clientHeight
         globe
-            .width(container.clientWidth)
-            .height(container.clientHeight)
+            .width(initW)
+            .height(initH)
             .backgroundImageUrl(BG_IMG)
             .bumpImageUrl(EARTH_BUMP)
             .showGlobe(true)
@@ -259,6 +338,10 @@ export default function GlobeGLView({ onGlobeReady }) {
             .atmosphereColor('rgba(0, 180, 255, 0.25)')
             .atmosphereAltitude(0.18)
             .pointOfView({ lat: homeView.lat, lng: homeView.lng, altitude: 2.5 })
+
+        if (typeof globe.rendererSize === 'function') {
+            globe.rendererSize(new Vector2(initW, initH))
+        }
 
         // Extend camera far plane so the sun (at ~23,500 units) isn't clipped
         // Default Three.js far = 2,000 which is far too short
@@ -476,32 +559,39 @@ export default function GlobeGLView({ onGlobeReady }) {
         globe
             .pathsData([])
             .pathPoints('coords')
-            .pathPointAlt(0.008)
-            .pathResolution(0.45)
+            .pathPointAlt(0.009)
+            // Finer angular step between interpolated vertices → smoother polylines on the sphere
+            .pathResolution(0.1)
             .pathColor((d) => d.color)
-            // FatLine pathStroke uses LineMaterial linewidth in *pixels*; values like 0.12 are
-            // sub-pixel and invisible. Use default thin GL lines (≈1px) — clearly visible.
-            .pathStroke(() => null)
+            // LineMaterial.linewidth is in screen pixels when FatLine is used
+            .pathStroke((d) => (d.stroke != null ? d.stroke : null))
 
         const tierAtInit = useAtlasStore.getState().resolvedTier
         const includeStateBorders = tierAtInit !== 'low'
+        const admin0Url = tierAtInit === 'low' ? NE_ADMIN0_110M : NE_ADMIN0_50M
+        const admin1Url = tierAtInit === 'high' ? NE_ADMIN1_10M : NE_ADMIN1_50M
 
         let mapOutlinesLoaded = false
         const loadMapOutlines = async () => {
             if (destroyed || mapOutlinesLoaded) return
             try {
-                const admin0Res = await fetch(NE_ADMIN0_LINES)
+                const admin0Res = await fetch(admin0Url)
                 const admin0 = await admin0Res.json()
                 const paths = [
-                    ...geoJsonLineFeaturesToPaths(admin0, 'rgba(255, 255, 255, 0.82)'),
+                    ...geoJsonLineFeaturesToPaths(
+                        admin0,
+                        STROKE_COUNTRY.color,
+                        STROKE_COUNTRY.strokePx,
+                    ),
                 ]
                 if (includeStateBorders) {
-                    const admin1Res = await fetch(NE_ADMIN1_LINES)
+                    const admin1Res = await fetch(admin1Url)
                     const admin1 = await admin1Res.json()
                     paths.push(
                         ...geoJsonLineFeaturesToPaths(
                             admin1,
-                            'rgba(160, 205, 255, 0.55)',
+                            STROKE_STATE.color,
+                            STROKE_STATE.strokePx,
                         ),
                     )
                 }
@@ -520,7 +610,8 @@ export default function GlobeGLView({ onGlobeReady }) {
         // three-globe hides its built-in tile engine when using a custom globeMaterial; we add a
         // second SlippyMap slightly above the surface so day/night shading stays on the base mesh.
         if (tierAtInit !== 'low') {
-            const labelMaxLevel = tierAtInit === 'medium' ? 5 : 6
+            // Higher max zoom → more place names (towns, etc.), closer to Cesium’s label LOD (z≈18).
+            const labelMaxLevel = tierAtInit === 'medium' ? 8 : 11
             labelTileLayer = new SlippyMap(GLOBE_RADIUS * 1.004, {
                 tileUrl: CARTO_LABEL_TILE_URL,
                 minLevel: 0,
@@ -528,7 +619,8 @@ export default function GlobeGLView({ onGlobeReady }) {
             })
             // Match three-globe’s built-in tile engine (sibling to globe mesh): no extra Y rotation.
             // globe.gl paths/points share this frame; −π/2 was misaligning label tiles.
-            labelTileLayer.curvatureResolution = 4
+            // Lower degrees per tile segment → smoother tile draping (less “choppy” quads).
+            labelTileLayer.curvatureResolution = 1.75
             // Hide the library’s protective black inner sphere so transparent label pixels show Earth.
             if (labelTileLayer.children[0]) labelTileLayer.children[0].visible = false
             scene.add(labelTileLayer)
@@ -560,9 +652,13 @@ export default function GlobeGLView({ onGlobeReady }) {
         // Resize
         const onResize = () => {
             if (globeRef.current && containerRef.current) {
-                globeRef.current
-                    .width(containerRef.current.clientWidth)
-                    .height(containerRef.current.clientHeight)
+                const w = containerRef.current.clientWidth
+                const h = containerRef.current.clientHeight
+                globeRef.current.width(w).height(h)
+                // Keeps FatLine (political boundaries) linewidth correct after resize
+                if (typeof globeRef.current.rendererSize === 'function') {
+                    globeRef.current.rendererSize(new Vector2(w, h))
+                }
             }
         }
         window.addEventListener('resize', onResize)

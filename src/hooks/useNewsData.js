@@ -453,7 +453,7 @@ async function geocodeWithNominatim(query, cache) {
   try {
     const res = await fetch(
       `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1&addressdetails=1`,
-      { headers: { 'User-Agent': 'ATLAS-Globe/1.0' }, signal: controller.signal },
+      { headers: { 'User-Agent': 'TATVA-Globe/1.0' }, signal: controller.signal },
     )
     clearTimeout(timer)
     const data = await res.json()

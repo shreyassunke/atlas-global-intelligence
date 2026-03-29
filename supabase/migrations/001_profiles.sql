@@ -1,4 +1,4 @@
--- Stores user preferences, synced from the ATLAS client on every change.
+-- Stores user preferences, synced from the TATVA client on every change.
 create table if not exists public.profiles (
   id              uuid references auth.users on delete cascade primary key,
   selected_sources jsonb,

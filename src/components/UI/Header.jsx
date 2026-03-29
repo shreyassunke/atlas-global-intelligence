@@ -3,8 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useAtlasStore } from '../../store/atlasStore'
 import SourceSearch from '../Onboarding/SourceSearch'
 import HeaderUserMenu from './HeaderUserMenu'
-import HeaderAudioVisualizer from './HeaderAudioVisualizer'
 import BgmTrackMenu from './BgmTrackMenu'
+import { AtlasWordmark } from './AtlasWordmark'
 
 const IconFilter = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -77,6 +77,14 @@ const IconSetup = () => (
   </svg>
 )
 
+const IconAmbient = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+    <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+    <path d="M18.07 5.93a9 9 0 0 1 0 12.14" />
+  </svg>
+)
+
 /** Hover tooltips (title) + accessible names with live counts */
 const TIER_HELP = {
   latent: {
@@ -104,10 +112,12 @@ export default function Header({ hudHidden = false, onToggleHud, onToggleSources
   const sourceStatuses = useAtlasStore((s) => s.sourceStatuses)
   const resetView = useAtlasStore((s) => s.resetView)
   const reopenOnboarding = useAtlasStore((s) => s.reopenOnboarding)
+  const reopenLanding = useAtlasStore((s) => s.reopenLanding)
   const triggerManualRefresh = useAtlasStore((s) => s.triggerManualRefresh)
   const manualRefreshUsedToday = useAtlasStore((s) => s.manualRefreshUsedToday)
   const selectedSources = useAtlasStore((s) => s.selectedSources)
   const tierCounts = useAtlasStore((s) => s.tierCounts)
+  const openBgmTrackMenu = useAtlasStore((s) => s.openBgmTrackMenu)
   const [moreOpen, setMoreOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const moreRef = useRef(null)
@@ -143,16 +153,18 @@ export default function Header({ hudHidden = false, onToggleHud, onToggleSources
         transition={{ delay: 1.5, duration: 0.6 }}
         className="hud-header"
       >
-        {/* Left: logo + status + audio viz (grid col 1 — balances col 3 for true center pills) */}
+        {/* Left: logo + status (grid col 1 — balances col 3 for true center pills) */}
         <div className="hud-header-left-zone">
           <div className="hud-header-left">
-            <h1 className="atlas-logo atlas-logo-header" role="img" aria-label="ATLAS">
-              {['A', 'T', 'L', 'A', 'S'].map((letter, i) => (
-                <div key={i} className="atlas-letter-wrap">
-                  <span className="atlas-letter" aria-hidden>{letter}</span>
-                </div>
-              ))}
-            </h1>
+            <button
+              type="button"
+              className="atlas-logo-header atlas-logo-header-btn"
+              aria-label="TATVA — open introduction"
+              title="Open TATVA introduction"
+              onClick={() => reopenLanding()}
+            >
+              <AtlasWordmark height={22} className="atlas-wordmark--header" aria-hidden />
+            </button>
 
             <div className="hud-api-pill" title={`${connectedCount} of ${totalSources} intel sources connected`}>
               <div className={`hud-api-dot ${connectedCount > 0 ? 'connected' : 'error'}`} />
@@ -162,10 +174,6 @@ export default function Header({ hudHidden = false, onToggleHud, onToggleSources
             {isLoading && (
               <span className="hud-loading-pulse">Syncing</span>
             )}
-          </div>
-
-          <div className="hud-header-wave-slot">
-            <HeaderAudioVisualizer />
           </div>
         </div>
 
@@ -199,11 +207,8 @@ export default function Header({ hudHidden = false, onToggleHud, onToggleSources
           </div>
         </div>
 
-        {/* Right: matching audio viz (mirrored) + icon actions — grid col 3 */}
+        {/* Right: icon actions — grid col 3 */}
         <div className="hud-header-right-zone">
-          <div className="hud-header-wave-slot hud-header-wave-slot--pair">
-            <HeaderAudioVisualizer mirrored />
-          </div>
           <div className="hud-header-right">
           <button
             onClick={onToggleFilters}
@@ -276,6 +281,18 @@ export default function Header({ hudHidden = false, onToggleHud, onToggleSources
                   >
                     <IconRefresh />
                     <span>Refresh Data</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="hud-dropdown-item"
+                    onClick={(e) => {
+                      const r = e.currentTarget.getBoundingClientRect()
+                      openBgmTrackMenu(r.left + r.width / 2, r.bottom + 4)
+                      setMoreOpen(false)
+                    }}
+                  >
+                    <IconAmbient />
+                    <span>Ambient audio</span>
                   </button>
 
                   <div className="hud-dropdown-divider" />

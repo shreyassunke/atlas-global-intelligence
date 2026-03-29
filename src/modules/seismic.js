@@ -101,7 +101,7 @@ export function normalizeGDACS(xmlText) {
       }))
     }
   } catch (e) {
-    console.warn('[ATLAS] GDACS parse error:', e)
+    console.warn('[TATVA] GDACS parse error:', e)
   }
 
   return events

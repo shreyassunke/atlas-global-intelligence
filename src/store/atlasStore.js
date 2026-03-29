@@ -5,10 +5,21 @@ import { loadQualitySettings, saveQualitySettings, loadGlobeMode, saveGlobeMode,
 import { initEventBus, startFetching, stopFetching, subscribeToBatchUpdates, subscribeToSourceStatus, destroyEventBus } from '../core/eventBus'
 import { supabase } from '../services/supabase'
 import { loadPersistedBgmTrackId, persistBgmTrackId, BGM_AMBIENT_TRACKS } from '../config/bgmTracks'
+import {
+  loadPersistedBgmProvider,
+  persistBgmProvider,
+  loadPersistedSpotifyContextUri,
+  persistSpotifyContextUri,
+  loadPersistedBgmYoutube,
+  persistBgmYoutube,
+} from '../config/bgmMusicState'
+import { loadSpotifyAuthFromStorage, persistSpotifyAuth } from '../music/spotifyTokens'
 
 const STORAGE_KEY_SOURCES = 'atlas_selected_sources'
 const STORAGE_KEY_ONBOARDED = 'atlas_onboarded'
 const STORAGE_KEY_BGM_VOL = 'atlas_bgm_volume'
+/** Legacy key — cleared on reopen so returning users see the landing page first again */
+const STORAGE_KEY_LANDING = 'atlas_landing_ack_v1'
 
 function loadPersistedBgmVolume() {
   try {
@@ -77,6 +88,8 @@ export const useAtlasStore = create((set, get) => ({
   zoomLevel: 1,
   selectedSources: loadSources(),
   hasCompletedOnboarding: loadOnboarded(),
+  /** Marketing / explainer screen — not persisted; every fresh load starts here until dismissed */
+  landingAcknowledged: false,
   sourceCatalog: [],
   streetViewLocation: null,
   isStreetViewOpen: false,
@@ -85,6 +98,18 @@ export const useAtlasStore = create((set, get) => ({
 
   /** Background music: ambient loop track id (see `config/bgmTracks.js`) */
   bgmAmbientTrackId: loadPersistedBgmTrackId(),
+  /** `atlas` | `spotify` | `youtube` | `apple_music` */
+  bgmProvider: loadPersistedBgmProvider(),
+  /** After intro.mp3 ends — external providers wait for this before starting */
+  bgmIntroComplete: false,
+  /** Spotify OAuth tokens (see `music/spotifyTokens.js`) */
+  spotifyAuth: loadSpotifyAuthFromStorage(),
+  /** e.g. spotify:playlist:abc — used with Web Playback SDK */
+  spotifyPlayContextUri: loadPersistedSpotifyContextUri(),
+  /** YouTube / YouTube Music background: video or playlist */
+  bgmYoutube: loadPersistedBgmYoutube(),
+  /** Last Spotify / YouTube error for the ambient menu */
+  bgmExternalMessage: null,
   /** `{ x, y }` client coords — null when the track picker is closed */
   bgmTrackMenu: null,
   /** Background music output level 0–1 (intro + ambient), persisted */
@@ -171,6 +196,17 @@ export const useAtlasStore = create((set, get) => ({
     set({ hasCompletedOnboarding: true })
   },
 
+  acknowledgeLanding: () => set({ landingAcknowledged: true }),
+
+  reopenLanding: () => {
+    try {
+      localStorage.removeItem(STORAGE_KEY_LANDING)
+    } catch {
+      /* ignore */
+    }
+    set({ landingAcknowledged: false })
+  },
+
   startLaunchTransition: () => set({ launchTransitionActive: true }),
   endLaunchTransition: () => set({ launchTransitionActive: false }),
   setSkipCesiumIntro: (v) => set({ skipCesiumIntro: v }),
@@ -205,6 +241,43 @@ export const useAtlasStore = create((set, get) => ({
     if (!BGM_AMBIENT_TRACKS.some((t) => t.id === id)) return
     persistBgmTrackId(id)
     set({ bgmAmbientTrackId: id })
+  },
+
+  setBgmProvider: (provider) => {
+    const allowed = ['atlas', 'spotify', 'youtube', 'apple_music']
+    if (!allowed.includes(provider)) return
+    persistBgmProvider(provider)
+    set({ bgmProvider: provider, bgmExternalMessage: null })
+  },
+
+  setBgmIntroComplete: (v) => set({ bgmIntroComplete: !!v }),
+
+  setSpotifyAuth: (auth) => {
+    persistSpotifyAuth(auth)
+    set({ spotifyAuth: auth })
+  },
+
+  setSpotifyPlayContextUri: (uri) => {
+    persistSpotifyContextUri(uri)
+    set({ spotifyPlayContextUri: uri || '', bgmExternalMessage: null })
+  },
+
+  setBgmYoutube: (spec) => {
+    persistBgmYoutube(spec)
+    set({ bgmYoutube: spec, bgmExternalMessage: null })
+  },
+
+  setBgmExternalMessage: (msg) => set({ bgmExternalMessage: msg || null }),
+
+  disconnectSpotifySession: () => {
+    persistSpotifyAuth(null)
+    persistSpotifyContextUri('')
+    set({
+      spotifyAuth: null,
+      spotifyPlayContextUri: '',
+      bgmProvider: 'atlas',
+      bgmExternalMessage: null,
+    })
   },
 
   openBgmTrackMenu: (x, y) => set({ bgmTrackMenu: { x, y } }),

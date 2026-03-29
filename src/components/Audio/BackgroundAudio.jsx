@@ -1,24 +1,30 @@
 import { useEffect, useRef } from 'react'
 import { useAtlasStore } from '../../store/atlasStore'
-import { setAtlasAudioAnalyser } from '../../audio/atlasAudioBus'
 import { getBgmTrackById } from '../../config/bgmTracks'
 
 const INTRO_URL = '/audio/intro.mp3'
 
-export default function BackgroundAudio() {
+/**
+ * Built-in intro + ambient loop. Only runs on the main TATVA tool surface (globe);
+ * `toolSurfaceActive` is false on landing, onboarding, and launch transition.
+ */
+export default function BackgroundAudio({ toolSurfaceActive = false }) {
   const introRef = useRef(null)
   const ambientRef = useRef(null)
   const hasStartedRef = useRef(false)
-  const audioContextRef = useRef(null)
-  const webAudioReadyRef = useRef(false)
-  /** When YouTube in-app player is open, pause BGM so only one source plays */
+  const toolSurfaceActiveRef = useRef(toolSurfaceActive)
   const youtubeEmbed = useAtlasStore((s) => s.youtubeEmbed)
   const bgmSuppressed = !!youtubeEmbed
   const bgmAmbientTrackId = useAtlasStore((s) => s.bgmAmbientTrackId)
+  const bgmProvider = useAtlasStore((s) => s.bgmProvider)
   const bgmVolume = useAtlasStore((s) => s.bgmVolume)
   const ambientSrc = getBgmTrackById(bgmAmbientTrackId).url
+  const setBgmIntroComplete = useAtlasStore((s) => s.setBgmIntroComplete)
 
-  // Keep HTMLMediaElement volume in sync (also drives Web Audio analyser levels)
+  useEffect(() => {
+    toolSurfaceActiveRef.current = toolSurfaceActive
+  }, [toolSurfaceActive])
+
   useEffect(() => {
     const intro = introRef.current
     const ambient = ambientRef.current
@@ -31,57 +37,50 @@ export default function BackgroundAudio() {
     ambient.volume = v
   }, [bgmVolume])
 
-  /** Route intro + ambient through one analyser for header visualizer (merged output). */
-  function ensureWebAudioGraph() {
-    if (webAudioReadyRef.current) return true
+  useEffect(() => {
+    if (toolSurfaceActive) return
     const intro = introRef.current
     const ambient = ambientRef.current
-    if (!intro || !ambient) return false
-
-    const Ctx = window.AudioContext || window.webkitAudioContext
-    if (!Ctx) return false
-
-    try {
-      const ctx = new Ctx()
-      const srcIntro = ctx.createMediaElementSource(intro)
-      const srcAmbient = ctx.createMediaElementSource(ambient)
-      const merger = ctx.createGain()
-      merger.gain.value = 1
-      srcIntro.connect(merger)
-      srcAmbient.connect(merger)
-      const analyser = ctx.createAnalyser()
-      /* Larger FFT + lower smoothing = header viz reads transients / spectrum more “live” */
-      analyser.fftSize = 512
-      analyser.minDecibels = -90
-      analyser.maxDecibels = -20
-      analyser.smoothingTimeConstant = 0.35
-      merger.connect(analyser)
-      analyser.connect(ctx.destination)
-      setAtlasAudioAnalyser(analyser)
-      audioContextRef.current = ctx
-      webAudioReadyRef.current = true
-      return true
-    } catch (e) {
-      console.warn('ATLAS: Web Audio routing unavailable; BGM still plays without visualizer.', e)
-      return false
+    if (intro) {
+      intro.pause()
+      intro.currentTime = 0
     }
-  }
+    if (ambient) {
+      ambient.pause()
+      ambient.currentTime = 0
+    }
+    hasStartedRef.current = false
+    setBgmIntroComplete(false)
+  }, [toolSurfaceActive, setBgmIntroComplete])
 
-  // After intro, keep ambient playing when the user switches tracks (src updates from the store)
   useEffect(() => {
     const ambient = ambientRef.current
     const intro = introRef.current
     if (!ambient || !intro) return
+
+    if (!toolSurfaceActive || bgmProvider !== 'atlas') {
+      ambient.pause()
+      ambient.removeAttribute('src')
+      ambient.load()
+      return
+    }
+
+    if (ambient.getAttribute('src') !== ambientSrc) {
+      ambient.src = ambientSrc
+      ambient.loop = true
+    }
+
     if (!hasStartedRef.current || bgmSuppressed) return
     if (!intro.ended) return
     ambient.play().catch(() => {})
-  }, [ambientSrc, bgmSuppressed])
+  }, [ambientSrc, bgmSuppressed, bgmProvider, toolSurfaceActive])
 
-  // Pause / resume BGM when YouTube overlay opens or closes (exclusive audio)
   useEffect(() => {
     const intro = introRef.current
     const ambient = ambientRef.current
     if (!intro || !ambient) return
+
+    if (!toolSurfaceActive) return
 
     if (bgmSuppressed) {
       intro.pause()
@@ -93,14 +92,15 @@ export default function BackgroundAudio() {
 
     if (!intro.ended) {
       intro.play().catch(() => {})
-    } else {
+    } else if (bgmProvider === 'atlas') {
       ambient.play().catch(() => {})
     }
-  }, [bgmSuppressed])
+  }, [bgmSuppressed, bgmProvider, toolSurfaceActive])
 
-  // Start on first user interaction (browser autoplay policy)
   useEffect(() => {
-    const startAudio = async () => {
+    if (!toolSurfaceActive) return
+
+    const startAudio = () => {
       if (hasStartedRef.current) return
       hasStartedRef.current = true
 
@@ -111,47 +111,48 @@ export default function BackgroundAudio() {
       const vol = useAtlasStore.getState().bgmVolume
       intro.volume = vol
       ambient.volume = vol
-      ambient.loop = true
 
-      ensureWebAudioGraph()
-      const ctx = audioContextRef.current
-      if (ctx?.state === 'suspended') {
-        try {
-          await ctx.resume()
-        } catch {
-          /* ignore */
-        }
+      if (useAtlasStore.getState().bgmProvider === 'atlas') {
+        ambient.src = getBgmTrackById(useAtlasStore.getState().bgmAmbientTrackId).url
+        ambient.loop = true
       }
 
       ambient.addEventListener('ended', function onAmbientEnded() {
         if (useAtlasStore.getState().youtubeEmbed) return
+        if (!toolSurfaceActiveRef.current) return
+        if (useAtlasStore.getState().bgmProvider !== 'atlas') return
         ambient.play().catch(() => {})
       })
+
+      const onIntroEnd = () => {
+        useAtlasStore.getState().setBgmIntroComplete(true)
+        if (useAtlasStore.getState().youtubeEmbed) return
+        if (useAtlasStore.getState().bgmProvider === 'atlas') {
+          ambient.play().catch(() => {})
+        }
+      }
+
+      intro.addEventListener('ended', onIntroEnd)
 
       intro.play().catch(() => {
         hasStartedRef.current = false
-      })
-
-      intro.addEventListener('ended', () => {
-        if (useAtlasStore.getState().youtubeEmbed) return
-        ambient.play().catch(() => {})
       })
     }
 
     const events = ['click', 'touchstart', 'keydown']
     const onInteraction = () => {
-      void startAudio()
+      startAudio()
       events.forEach((e) => document.removeEventListener(e, onInteraction))
     }
 
     events.forEach((e) => document.addEventListener(e, onInteraction))
     return () => events.forEach((e) => document.removeEventListener(e, onInteraction))
-  }, [])
+  }, [toolSurfaceActive])
 
   return (
     <>
       <audio ref={introRef} src={INTRO_URL} preload="auto" />
-      <audio ref={ambientRef} src={ambientSrc} preload="auto" loop />
+      <audio ref={ambientRef} preload="auto" />
     </>
   )
 }

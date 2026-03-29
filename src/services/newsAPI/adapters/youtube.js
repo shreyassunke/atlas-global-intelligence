@@ -66,7 +66,7 @@ export async function fetchYouTubeVideos(apiKey, { queries, maxPerQuery = MAX_RE
         if (!res.ok) {
           if (import.meta.env.DEV) {
             console.warn(
-              '[ATLAS] YouTube search failed:',
+              '[TATVA] YouTube search failed:',
               res.status,
               data?.error?.message || data?.error || res.statusText,
               '(check API key restrictions: enable YouTube Data API v3 for this key, HTTP referrer for browser)',
@@ -75,7 +75,7 @@ export async function fetchYouTubeVideos(apiKey, { queries, maxPerQuery = MAX_RE
           return null
         }
         if (data.error && import.meta.env.DEV) {
-          console.warn('[ATLAS] YouTube API error:', data.error)
+          console.warn('[TATVA] YouTube API error:', data.error)
         }
         if (!data.items?.length) return null
         for (const item of data.items) {
@@ -87,7 +87,7 @@ export async function fetchYouTubeVideos(apiKey, { queries, maxPerQuery = MAX_RE
         }
       })
       .catch((err) => {
-        if (import.meta.env.DEV) console.warn('[ATLAS] YouTube search request failed:', err?.message || err)
+        if (import.meta.env.DEV) console.warn('[TATVA] YouTube search request failed:', err?.message || err)
         return null
       })
   })

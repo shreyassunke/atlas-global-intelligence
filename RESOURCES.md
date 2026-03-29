@@ -1,4 +1,4 @@
-# ATLAS — Geospatial Resource Index
+# TATVA — Geospatial Resource Index
 
 ## Cities, Towns, Locations & Labels
 

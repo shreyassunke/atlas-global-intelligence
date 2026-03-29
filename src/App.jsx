@@ -1,10 +1,13 @@
-import { useEffect, useState, useRef, useCallback, lazy, Suspense } from 'react'
+import { useEffect, useState, useRef, useCallback, useMemo, lazy, Suspense } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useAtlasStore } from './store/atlasStore'
 import { useNewsData } from './hooks/useNewsData'
 import Onboarding from './components/Onboarding/Onboarding'
 import CesiumStarfieldBackground from './components/Onboarding/CesiumStarfieldBackground'
 import BackgroundAudio from './components/Audio/BackgroundAudio'
+import SpotifyOAuthCallback from './components/Audio/SpotifyOAuthCallback'
+import SpotifyBgmController from './components/Audio/SpotifyBgmController'
+import YouTubeBgmPlayer from './components/Audio/YouTubeBgmPlayer'
 import Header from './components/UI/Header'
 import FilterPanel from './components/UI/FilterPanel'
 import NewsCard from './components/UI/NewsCard'
@@ -18,6 +21,7 @@ import SettingsPanel from './components/UI/SettingsPanel'
 import SourcesPanel from './components/UI/SourcesPanel'
 import DomainFilters from './components/UI/DomainFilters'
 import { usePreferencesSync } from './hooks/usePreferencesSync'
+import LandingPage from './components/Landing/LandingPage'
 
 // Lazy-load heavy 3D components — Cesium (~4MB) and globe.gl/Three.js (~1MB) don't
 // need to be in the initial bundle since they're only rendered after onboarding.
@@ -29,7 +33,9 @@ const ParticleEarthTransition = lazy(() => import('./components/Transition/Parti
 const SUN_ANGLE_THROTTLE_MS = 50
 
 export default function App() {
+  const [pathTick, setPathTick] = useState(0)
   const hasCompletedOnboarding = useAtlasStore((s) => s.hasCompletedOnboarding)
+  const landingAcknowledged = useAtlasStore((s) => s.landingAcknowledged)
   const launchTransitionActive = useAtlasStore((s) => s.launchTransitionActive)
   const [hudHidden, setHudHidden] = useState(false)
   const [sunAngle, setSunAngle] = useState(0)
@@ -46,6 +52,12 @@ export default function App() {
   useEffect(() => {
     document.body.setAttribute('data-colorblind', String(colorblindMode))
   }, [colorblindMode])
+
+  useEffect(() => {
+    const onHistory = () => setPathTick((t) => t + 1)
+    window.addEventListener('atlas-history', onHistory)
+    return () => window.removeEventListener('atlas-history', onHistory)
+  }, [])
 
   useEffect(() => {
     const isMobile = window.innerWidth < 768 || 'ontouchstart' in window
@@ -73,8 +85,23 @@ export default function App() {
     return () => window.removeEventListener('resize', resizeHandler)
   }, [])
 
+  const pathname = useMemo(() => {
+    if (typeof window === 'undefined') return '/'
+    return window.location.pathname.replace(/\/$/, '') || '/'
+  }, [pathTick])
+
+  const isSpotifyOAuthReturn = pathname.endsWith('/spotify-callback')
+
+  const showLandingLayer = !landingAcknowledged && !isSpotifyOAuthReturn
+
+  /** Intro + ambient BGM only on the main TATVA tool (globe), not landing, setup, or transition */
+  const bgmToolSurfaceActive =
+    !showLandingLayer && !launchTransitionActive && hasCompletedOnboarding
+
   const onGlobeView = hasCompletedOnboarding && !launchTransitionActive
   const showStarfield =
+    isSpotifyOAuthReturn ||
+    showLandingLayer ||
     !hasCompletedOnboarding ||
     launchTransitionActive ||
     (onGlobeView && !globeReady)
@@ -137,7 +164,10 @@ export default function App() {
 
   return (
     <>
-      <BackgroundAudio />
+      <SpotifyOAuthCallback />
+      <BackgroundAudio toolSurfaceActive={bgmToolSurfaceActive} />
+      <SpotifyBgmController toolSurfaceActive={bgmToolSurfaceActive} />
+      <YouTubeBgmPlayer toolSurfaceActive={bgmToolSurfaceActive} />
       {/* Persistent starfield: same instance from setup through transition. Never unmounts until globe. */}
       {showStarfield && (
         <div className="fixed inset-0 z-0" aria-hidden>
@@ -145,7 +175,9 @@ export default function App() {
         </div>
       )}
       <AnimatePresence mode="wait">
-        {launchTransitionActive ? (
+        {showLandingLayer ? (
+          <LandingPage key="atlas-landing" />
+        ) : launchTransitionActive ? (
           <motion.div
             key="transition"
             initial={{ opacity: 0 }}

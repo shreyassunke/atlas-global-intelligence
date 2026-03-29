@@ -615,7 +615,7 @@ export default function CesiumGlobe({ onGlobeReady }) {
             )
             addNightLayer(ionLayer)
           } catch (e) {
-            console.warn('ATLAS: Ion Earth at Night / Black Marble (3812) failed:', e?.message || e)
+            console.warn('TATVA: Ion Earth at Night / Black Marble (3812) failed:', e?.message || e)
           }
         }
 
@@ -634,7 +634,7 @@ export default function CesiumGlobe({ onGlobeReady }) {
             const gibsLayer = new Cesium.ImageryLayer(gibs, nightLayerOpts)
             addNightLayer(gibsLayer)
           } catch (e) {
-            console.warn('ATLAS: GIBS Black Marble (REST WMTS) failed:', e?.message || e)
+            console.warn('TATVA: GIBS Black Marble (REST WMTS) failed:', e?.message || e)
           }
         }
 

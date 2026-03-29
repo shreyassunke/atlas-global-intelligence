@@ -6,9 +6,15 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy": "npx vercel --prod",
+    "deploy:preview": "npx vercel"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "devDependencies": {
+    "vercel": "^50.0.0",
     "vite": "^7.3.1"
   },
   "dependencies": {

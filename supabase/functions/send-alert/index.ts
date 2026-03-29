@@ -120,9 +120,9 @@ serve(async (req) => {
 
   const matchingRules = (rules as AlertRule[]).filter((r) => matches(r, event))
 
-  const subject = `[ATLAS] ${event.tier.toUpperCase()}: ${event.title}`
+  const subject = `[TATVA] ${event.tier.toUpperCase()}: ${event.title}`
   const body = [
-    `ATLAS Alert — ${event.tier.toUpperCase()}`,
+    `TATVA Alert — ${event.tier.toUpperCase()}`,
     `Title: ${event.title}`,
     event.domain ? `Domain: ${event.domain}` : '',
     event.region ? `Region: ${event.region}` : '',

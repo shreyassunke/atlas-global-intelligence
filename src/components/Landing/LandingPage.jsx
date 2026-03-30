@@ -8,7 +8,8 @@ import { LandingGlobeDemoFallback } from './LandingGlobeDemoFallback'
 const LandingGlobeDemo = lazy(() => import('./LandingGlobeDemo'))
 
 const LANDING_NAV = [
-  { id: 'cta-join', label: 'Explore' },
+  { id: 'the-problem', label: 'The Problem' },
+  { id: 'what-you-get', label: 'What You Get' },
   { id: 'contact', label: 'Contact' },
 ]
 
@@ -45,6 +46,7 @@ export default function LandingPage() {
   const landingScrollRef = useRef(null)
   const navTopSentinelRef = useRef(null)
   const [navAtTop, setNavAtTop] = useState(true)
+  const [immersive, setImmersive] = useState(false)
 
   const scrollTo = useCallback((id) => {
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -55,6 +57,29 @@ export default function LandingPage() {
   }, [])
 
   const enterApp = useCallback(() => acknowledgeLanding(), [acknowledgeLanding])
+
+  const toggleImmersive = useCallback(() => {
+    setImmersive((prev) => !prev)
+  }, [])
+
+  const exitImmersive = useCallback(() => setImmersive(false), [])
+
+  // ESC exits immersive mode
+  useEffect(() => {
+    if (!immersive) return
+    const onKey = (e) => { if (e.key === 'Escape') setImmersive(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [immersive])
+
+  // Nav link click also exits immersive
+  const navScrollTo = useCallback((id) => {
+    setImmersive(false)
+    // Small delay to let content reappear before scrolling
+    setTimeout(() => {
+      document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 60)
+  }, [])
 
   useEffect(() => {
     const root = landingScrollRef.current
@@ -73,7 +98,7 @@ export default function LandingPage() {
   return (
     <motion.div
       ref={landingScrollRef}
-      className="landing-page stitch-landing fixed inset-0 z-[55] flex flex-col overflow-y-auto overflow-x-hidden"
+      className={`landing-page stitch-landing fixed inset-0 z-[55] flex flex-col overflow-y-auto overflow-x-hidden${immersive ? ' landing--immersive' : ''}`}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -104,22 +129,31 @@ export default function LandingPage() {
           </button>
           <div className="stitch-nav-bar__links stitch-nav-bar__links--desktop">
             {LANDING_NAV.map(({ id, label }) => (
-              <button key={id} type="button" onClick={() => scrollTo(id)} className="stitch-nav-link">
+              <button key={id} type="button" onClick={() => navScrollTo(id)} className="stitch-nav-link">
                 {label}
               </button>
             ))}
+            <button type="button" onClick={toggleImmersive} className={`stitch-nav-link${immersive ? ' stitch-nav-link--active' : ''}`}>
+              Explore
+            </button>
           </div>
           <div className="stitch-nav-bar__actions justify-self-end">
-            <button type="button" onClick={enterApp} className="stitch-btn-primary stitch-btn-primary--nav">
-              {hasCompletedOnboarding ? 'Login' : 'Get started'}
+            <button type="button" onClick={enterApp} className="stitch-nav-login-link" id="nav-login">
+              Login
+            </button>
+            <button type="button" onClick={enterApp} className="stitch-btn-dark-pill" id="nav-try-free">
+              Try Free
             </button>
           </div>
           <div className="stitch-nav-bar__links stitch-nav-bar__links--mobile">
             {LANDING_NAV.map(({ id, label }) => (
-              <button key={id} type="button" onClick={() => scrollTo(id)} className="stitch-nav-link">
+              <button key={id} type="button" onClick={() => navScrollTo(id)} className="stitch-nav-link">
                 {label}
               </button>
             ))}
+            <button type="button" onClick={toggleImmersive} className={`stitch-nav-link${immersive ? ' stitch-nav-link--active' : ''}`}>
+              Explore
+            </button>
           </div>
         </nav>
       </header>
@@ -167,11 +201,19 @@ export default function LandingPage() {
               variants={fadeUp}
               initial="hidden"
               animate="show"
-              className="mt-16"
+              className="stitch-hero__cta-row mt-24"
             >
-              <button type="button" onClick={enterApp} className="stitch-btn-ghost" id="hero-cta">
-                <span className="stitch-btn-ghost__text">{hasCompletedOnboarding ? 'Enter Atlas' : 'Get Started'}</span>
-                <span className="stitch-btn-ghost__arrow" aria-hidden>→</span>
+              <button type="button" onClick={enterApp} className="stitch-btn-dark-pill stitch-btn-dark-pill--hero" id="hero-cta">
+                <span className="stitch-btn-dark-pill__text">Get Started</span>
+                <span className="stitch-btn-dark-pill__arrow" aria-hidden>→</span>
+              </button>
+              <button
+                type="button"
+                className="stitch-hero-see-link"
+                onClick={() => scrollTo('what-you-get')}
+                id="hero-see-what-you-get"
+              >
+                See What You Get
               </button>
             </motion.div>
           </motion.div>
@@ -179,7 +221,7 @@ export default function LandingPage() {
             <button
               type="button"
               className="stitch-hero-scroll-cue"
-              onClick={() => scrollTo('cta-join')}
+              onClick={() => scrollTo('the-problem')}
               aria-label="Scroll to next section"
             >
               <span className="stitch-hero-scroll-cue__line" aria-hidden />
@@ -193,7 +235,7 @@ export default function LandingPage() {
         </section>
 
         {/* ── Why ATLAS ── */}
-        <section id="cta-join" className="atlas-why landing-hit-target scroll-mt-20">
+        <section id="the-problem" className="atlas-why landing-hit-target scroll-mt-20">
           <motion.div
             initial={{ opacity: 0, y: 30 }}
             whileInView={{ opacity: 1, y: 0 }}
@@ -258,7 +300,7 @@ export default function LandingPage() {
         </section>
 
         {/* ── Feature Education ── */}
-        <section className="atlas-features landing-hit-target">
+        <section id="what-you-get" className="atlas-features landing-hit-target scroll-mt-20">
           <motion.div
             className="atlas-why__header"
             initial={{ opacity: 0, y: 24 }}
@@ -322,10 +364,10 @@ export default function LandingPage() {
             <h2 className="atlas-section-title atlas-section-title--sm">
               The world is signaling.<br />Are you listening?
             </h2>
-            <div className="mt-10 flex justify-center">
-              <button type="button" onClick={enterApp} className="stitch-btn-ghost" id="cta-enter">
-                <span className="stitch-btn-ghost__text">{hasCompletedOnboarding ? 'Enter Atlas' : 'Start Now'}</span>
-                <span className="stitch-btn-ghost__arrow" aria-hidden>→</span>
+            <div className="mt-16 flex justify-center">
+              <button type="button" onClick={enterApp} className="stitch-btn-dark-pill stitch-btn-dark-pill--hero" id="cta-enter">
+                <span className="stitch-btn-dark-pill__text">Start Now</span>
+                <span className="stitch-btn-dark-pill__arrow" aria-hidden>→</span>
               </button>
             </div>
           </motion.div>
@@ -358,11 +400,11 @@ export default function LandingPage() {
               </p>
               <a
                 href="mailto:hello@atlas-intelligence.io"
-                className="stitch-btn-ghost atlas-footer__inline-btn"
+                className="stitch-btn-dark-pill stitch-btn-dark-pill--sm"
                 id="footer-contact-btn"
               >
-                <span className="stitch-btn-ghost__text">Send a message</span>
-                <span className="stitch-btn-ghost__arrow" aria-hidden>→</span>
+                <span className="stitch-btn-dark-pill__text">Send a message</span>
+                <span className="stitch-btn-dark-pill__arrow" aria-hidden>→</span>
               </a>
             </div>
 
@@ -377,7 +419,7 @@ export default function LandingPage() {
                   href="https://github.com/shreyaslas-global-intelligence/issues/new?template=bug_report.md"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="atlas-pill-btn"
+                  className="stitch-btn-dark-pill stitch-btn-dark-pill--sm"
                   id="footer-bug-btn"
                 >
                   🐛 Report a bug
@@ -386,7 +428,7 @@ export default function LandingPage() {
                   href="https://github.com/shreyaslas-global-intelligence/issues/new?template=feature_request.md"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="atlas-pill-btn atlas-pill-btn--accent"
+                  className="stitch-btn-dark-pill stitch-btn-dark-pill--sm"
                   id="footer-feature-btn"
                 >
                   ✦ Request a feature
@@ -397,7 +439,8 @@ export default function LandingPage() {
 
           <div className="atlas-footer__bottom">
             <nav className="atlas-footer__nav" aria-label="Footer nav">
-              <button type="button" onClick={() => scrollTo('cta-join')} className="stitch-footer-link">Explore</button>
+              <button type="button" onClick={() => scrollTo('the-problem')} className="stitch-footer-link">The Problem</button>
+              <button type="button" onClick={() => scrollTo('what-you-get')} className="stitch-footer-link">What You Get</button>
               <button type="button" onClick={() => scrollTo('contact')} className="stitch-footer-link">Contact</button>
             </nav>
             <p className="atlas-footer__copy">

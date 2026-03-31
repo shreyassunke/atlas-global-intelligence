@@ -42,6 +42,7 @@ const blockRise = {
 
 export default function LandingPage() {
   const acknowledgeLanding = useAtlasStore((s) => s.acknowledgeLanding)
+  const setOnboardingStep = useAtlasStore((s) => s.setOnboardingStep)
   const hasCompletedOnboarding = useAtlasStore((s) => s.hasCompletedOnboarding)
   const landingScrollRef = useRef(null)
   const navTopSentinelRef = useRef(null)
@@ -56,7 +57,10 @@ export default function LandingPage() {
     landingScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
   }, [])
 
-  const enterApp = useCallback(() => acknowledgeLanding(), [acknowledgeLanding])
+  const enterApp = useCallback(() => {
+    setOnboardingStep('auth')
+    acknowledgeLanding()
+  }, [acknowledgeLanding, setOnboardingStep])
 
   const toggleImmersive = useCallback(() => {
     setImmersive((prev) => !prev)

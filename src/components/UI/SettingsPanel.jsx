@@ -28,6 +28,15 @@ const TOGGLE_SETTINGS = [
     { key: 'autoRotate', label: 'Auto-Rotate', icon: '↻' },
 ]
 
+const DATA_LAYER_TOGGLES = [
+    { key: 'gdelt', label: 'GDELT Geopolitics', icon: '⚔', desc: 'Conflict, diplomacy, protests from GDELT 2.0' },
+    { key: 'firms', label: 'NASA FIRMS Fires', icon: '🔥', desc: 'Active fire & thermal anomaly data' },
+    { key: 'usgs', label: 'USGS Earthquakes', icon: '🌋', desc: 'Real-time seismic activity worldwide' },
+    { key: 'gdacs', label: 'GDACS Disasters', icon: '🌊', desc: 'Global disaster alerts & coordination' },
+    { key: 'eonet', label: 'NASA EONET', icon: '🛰', desc: 'Earth Observatory natural events' },
+    { key: 'news', label: 'News Articles', icon: '📰', desc: 'Commercial news API articles on globe' },
+]
+
 export default function SettingsPanel() {
     const settingsOpen = useAtlasStore((s) => s.settingsOpen)
     const setSettingsOpen = useAtlasStore((s) => s.setSettingsOpen)
@@ -43,6 +52,8 @@ export default function SettingsPanel() {
     const toggleColorblindMode = useAtlasStore((s) => s.toggleColorblindMode)
     const user = useAtlasStore((s) => s.user)
     const signOut = useAtlasStore((s) => s.signOut)
+    const dataLayers = useAtlasStore((s) => s.dataLayers)
+    const toggleDataLayer = useAtlasStore((s) => s.toggleDataLayer)
     const panelRef = useRef(null)
     const [alertsOpen, setAlertsOpen] = useState(false)
 
@@ -112,6 +123,32 @@ export default function SettingsPanel() {
                         </div>
                         <div className="settings-hint">
                             {GLOBE_MODES.find((m) => m.id === globeMode)?.desc}
+                        </div>
+                    </div>
+
+                    {/* ── Data Layers ── */}
+                    <div className="settings-section">
+                        <div className="settings-section-label">Data Layers</div>
+                        <div className="settings-toggles">
+                            {DATA_LAYER_TOGGLES.map(({ key, label, icon }) => {
+                                const isOn = dataLayers[key] !== false
+                                return (
+                                    <button
+                                        key={key}
+                                        onClick={() => toggleDataLayer(key)}
+                                        className={`settings-feature-row ${isOn ? 'on' : 'off'}`}
+                                    >
+                                        <span className="settings-feature-icon">{icon}</span>
+                                        <span className="settings-feature-label">{label}</span>
+                                        <span className={`settings-feature-switch ${isOn ? 'on' : ''}`}>
+                                            <span className="settings-feature-knob" />
+                                        </span>
+                                    </button>
+                                )
+                            })}
+                        </div>
+                        <div className="settings-hint">
+                            Toggle intelligence layers on the globe. Data provided by the GDELT Project, NASA, and USGS.
                         </div>
                     </div>
 

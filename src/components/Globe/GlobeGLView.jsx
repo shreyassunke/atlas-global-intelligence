@@ -28,6 +28,7 @@ import * as solar from 'solar-calculator'
 import { useAtlasStore } from '../../store/atlasStore'
 import { getTimezoneViewCenter } from '../../utils/geo'
 import { getCategoryColor } from '../../utils/categoryColors'
+import { TIER_COLORS } from '../../core/eventSchema'
 
 // Textures (CDN)
 const EARTH_DAY = 'https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-day.jpg'
@@ -299,20 +300,68 @@ export default function GlobeGLView({ onGlobeReady }) {
 
     const newsItems = useAtlasStore((s) => s.newsItems)
     const activeCategories = useAtlasStore((s) => s.activeCategories)
+    const events = useAtlasStore((s) => s.events)
+    const dataLayers = useAtlasStore((s) => s.dataLayers)
     const setSelectedMarker = useAtlasStore((s) => s.setSelectedMarker)
     const setHoveredMarker = useAtlasStore((s) => s.setHoveredMarker)
+    const setSelectedEvent = useAtlasStore((s) => s.setSelectedEvent)
     const setZoomLevel = useAtlasStore((s) => s.setZoomLevel)
     const resolvedTier = useAtlasStore((s) => s.resolvedTier)
     const qualityOverrides = useAtlasStore((s) => s.qualityOverrides)
 
+    /** Map event source IDs to data layer keys */
+    const sourceToLayer = useCallback((source) => {
+        const s = (source || '').toLowerCase()
+        if (s.includes('gdelt')) return 'gdelt'
+        if (s.includes('firms') || s.includes('fire')) return 'firms'
+        if (s.includes('usgs') || s.includes('earthquake')) return 'usgs'
+        if (s.includes('gdacs')) return 'gdacs'
+        if (s.includes('eonet')) return 'eonet'
+        return null // other sources always visible
+    }, [])
+
+    /** Get event marker color by tier */
+    const getEventColor = useCallback((event) => {
+        return TIER_COLORS[event.tier] || TIER_COLORS.latent
+    }, [])
+
+    /** Get event point radius based on severity */
+    const getEventRadius = useCallback((event) => {
+        const base = event.severity >= 4 ? 0.55 : event.severity >= 3 ? 0.42 : 0.3
+        return base
+    }, [])
+
     const getVisibleItems = useCallback(() => {
-        return newsItems.filter(
-            (item) =>
-                item.lat != null &&
-                item.lng != null &&
-                activeCategories.has(item.category),
-        )
-    }, [newsItems, activeCategories])
+        // News items (only if 'news' layer is on)
+        const newsVisible = dataLayers.news !== false
+            ? newsItems.filter(
+                (item) =>
+                    item.lat != null &&
+                    item.lng != null &&
+                    activeCategories.has(item.category),
+            ).map(item => ({ ...item, _isNews: true }))
+            : []
+
+        // EventBus events (filtered by data layers and valid coords)
+        const eventVisible = events
+            .filter((evt) => {
+                if (!evt.lat || !evt.lng || (evt.lat === 0 && evt.lng === 0 && evt.latApproximate)) return false
+                const layerKey = sourceToLayer(evt.source)
+                if (layerKey && dataLayers[layerKey] === false) return false
+                return true
+            })
+            .map((evt) => ({
+                ...evt,
+                lat: evt.lat,
+                lng: evt.lng,
+                category: evt.domain || 'signals',
+                _isEvent: true,
+                _color: getEventColor(evt),
+                _radius: getEventRadius(evt),
+            }))
+
+        return [...newsVisible, ...eventVisible]
+    }, [newsItems, activeCategories, events, dataLayers, sourceToLayer, getEventColor, getEventRadius])
 
     // ── Initialise globe once ──
     useEffect(() => {
@@ -486,15 +535,24 @@ export default function GlobeGLView({ onGlobeReady }) {
             .pointsData([])
             .pointLat('lat')
             .pointLng('lng')
-            .pointColor((d) => getCategoryColor(d.category))
+            .pointColor((d) => d._isEvent ? (d._color || '#1a90ff') : getCategoryColor(d.category))
             .pointAltitude(POINT_ALTITUDE)
-            .pointRadius((d) => d.mediaType === 'video' ? 0.5 : 0.35)
+            .pointRadius((d) => {
+                if (d._isEvent) return d._radius || 0.35
+                return d.mediaType === 'video' ? 0.5 : 0.35
+            })
             .pointsMerge(false)
             .onPointClick((d) => {
-                // Open the NewsCard (same as CesiumGlobe)
-                setSelectedMarker(d)
+                if (d._isEvent) {
+                    // Select as intelligence event
+                    setSelectedEvent(d)
+                    setSelectedMarker(null)
+                } else {
+                    // Open the NewsCard (same as CesiumGlobe)
+                    setSelectedMarker(d)
+                    setSelectedEvent(null)
+                }
                 // Fly closer to the clicked marker
-                // altitude is in globe-radii: 2.5 = default view, 0.15 = very close
                 const currentAlt = globe.pointOfView().altitude ?? 2.5
                 const targetAlt = Math.max(0.15, Math.min(0.8, currentAlt * 0.4))
                 globe.pointOfView(
@@ -527,12 +585,11 @@ export default function GlobeGLView({ onGlobeReady }) {
         }
         container.addEventListener('pointermove', onPointerMove)
 
-        // ── Globe background click — dismiss news card ──
+        // ── Globe background click — dismiss both news card and event panel ──
         globe.onGlobeClick(() => {
             const store = useAtlasStore.getState()
-            if (store.selectedMarker) {
-                store.setSelectedMarker(null)
-            }
+            if (store.selectedMarker) store.setSelectedMarker(null)
+            if (store.selectedEvent) store.setSelectedEvent(null)
         })
 
         // ── Rings layer ──
@@ -541,7 +598,10 @@ export default function GlobeGLView({ onGlobeReady }) {
             .ringLat('lat')
             .ringLng('lng')
             .ringColor((d) => {
-                const c = getCategoryColor(d.category)
+                // Use tier color for events, category color for news
+                const c = d._isEvent
+                    ? (d._color || TIER_COLORS.latent)
+                    : getCategoryColor(d.category)
                 return (t) => {
                     const alpha = 1 - t
                     const r = parseInt(c.slice(1, 3), 16)
@@ -550,7 +610,12 @@ export default function GlobeGLView({ onGlobeReady }) {
                     return `rgba(${r},${g},${b},${alpha * 0.45})`
                 }
             })
-            .ringMaxRadius(RING_MAX_RADIUS)
+            .ringMaxRadius((d) => {
+                // Larger rings for higher-severity events
+                if (d._isEvent && d.severity >= 4) return 5
+                if (d._isEvent && d.severity >= 3) return 4
+                return RING_MAX_RADIUS
+            })
             .ringPropagationSpeed(RING_PROPAGATION_SPEED)
             .ringRepeatPeriod(() => 2000 + Math.random() * 2000)
             .ringAltitude(POINT_ALTITUDE)
@@ -710,8 +775,12 @@ export default function GlobeGLView({ onGlobeReady }) {
         if (!globe) return
         const visible = getVisibleItems()
         globe.pointsData(visible)
-        globe.ringsData(visible.slice(0, 60))
-    }, [newsItems, activeCategories, getVisibleItems])
+        // Rings: prioritize high-severity events, then news
+        const ringItems = visible
+            .sort((a, b) => (b.severity || 0) - (a.severity || 0))
+            .slice(0, 80)
+        globe.ringsData(ringItems)
+    }, [newsItems, activeCategories, events, dataLayers, getVisibleItems])
 
     // ── Zoom sync ──
     useEffect(() => {

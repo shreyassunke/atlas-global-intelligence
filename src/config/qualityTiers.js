@@ -166,10 +166,16 @@ export function saveQualitySettings(settings) {
  */
 export function loadGlobeMode() {
     try {
-        return localStorage.getItem(GLOBE_MODE_STORAGE_KEY) || 'cesium'
+        const stored = localStorage.getItem(GLOBE_MODE_STORAGE_KEY)
+        // Prevent Cesium out-of-memory crashes on mobile devices by overriding preference
+        if (stored === 'cesium' && isMobileDevice()) {
+            return 'globegl'
+        }
+        if (stored) return stored
     } catch {
-        return 'cesium'
+        /* ignore */
     }
+    return isMobileDevice() ? 'globegl' : 'cesium'
 }
 
 /**

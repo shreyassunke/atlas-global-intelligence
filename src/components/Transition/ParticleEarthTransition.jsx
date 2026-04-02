@@ -72,7 +72,11 @@ export default function ParticleEarthTransition() {
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
     renderer.setClearColor(0x000000, 0)
     renderer.setSize(width, height)
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    
+    // Prevent GPU OOM crashes on mobile by capping pixel ratio
+    const isMobile = window.innerWidth < 768 || 'ontouchstart' in window
+    renderer.setPixelRatio(isMobile ? 1 : Math.min(window.devicePixelRatio, 2))
+    
     container.appendChild(renderer.domElement)
 
     const startPositions = new Float32Array(PARTICLE_COUNT * 3)

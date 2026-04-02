@@ -99,7 +99,13 @@ export default function Onboarding({ sunAngle = 0 }) {
     else addSource({ id: source.id, name: source.name, type: source.type || 'source' })
   }
 
-  const handleLaunch = () => startLaunchTransition()
+  const handleLaunch = () => {
+    try {
+      // Prevents infinite loops on mobile if the WebGL transition triggers a browser OOM crash and reboot.
+      localStorage.setItem('atlas_onboarded', 'true')
+    } catch { /* ignore */ }
+    startLaunchTransition()
+  }
 
   const handleSelectAllSources = () => {
     setSelectedSources(catalog.map((s) => ({ id: s.id, name: s.name, type: 'source' })))

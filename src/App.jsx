@@ -13,6 +13,7 @@ import FilterPanel from './components/UI/FilterPanel'
 import NewsCard from './components/UI/NewsCard'
 import EventPanel from './components/UI/EventPanel'
 import LiveTicker from './components/Feed/LiveTicker'
+import NewsSidebar from './components/Feed/NewsSidebar'
 import HoverLabel from './components/UI/RegionRing'
 import ClockOverlay from './components/UI/ClockOverlay'
 import StreetViewOverlay from './components/UI/StreetViewOverlay'
@@ -43,6 +44,10 @@ export default function App() {
   const lastSunAngleRef = useRef(0)
   const globeMode = useAtlasStore((s) => s.globeMode)
   const initEventBusSystem = useAtlasStore((s) => s.initEventBusSystem)
+  const isCesium = globeMode === 'cesium'
+  const filterParams = useAtlasStore((s) => s.filterParams)
+  const newsSidebarOpen = useAtlasStore((s) => s.newsSidebarOpen)
+  const setNewsSidebarOpen = useAtlasStore((s) => s.setNewsSidebarOpen)
   const colorblindMode = useAtlasStore((s) => s.colorblindMode)
   const [sourcesOpen, setSourcesOpen] = useState(false)
   const [filtersOpen, setFiltersOpen] = useState(false)
@@ -258,6 +263,7 @@ export default function App() {
                   <LiveTicker />
                   <SettingsPanel />
                   <SourcesPanel open={sourcesOpen} onClose={() => setSourcesOpen(false)} />
+                  <NewsSidebar open={newsSidebarOpen} onClose={() => setNewsSidebarOpen(false)} />
                 </motion.div>
               )}
             </AnimatePresence>

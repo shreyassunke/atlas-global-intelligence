@@ -29,6 +29,8 @@ export const SOURCE_CATALOG = {
   'noaa-xray': { name: 'NOAA X-Ray Flux', module: MODULES.SPACE, domain: DOMAINS.SIGNALS, authoritative: true, requiresKey: false, pollInterval: 300_000 },
   'noaa-solar-wind': { name: 'NOAA Solar Wind', module: MODULES.SPACE, domain: DOMAINS.SIGNALS, authoritative: true, requiresKey: false, pollInterval: 300_000 },
   gdelt: { name: 'GDELT', module: MODULES.NEWS, domain: DOMAINS.SIGNALS, authoritative: false, requiresKey: false, pollInterval: 300_000 },
+  'gdelt-events': { name: 'GDELT Events', module: MODULES.CONFLICT, domain: DOMAINS.CONFLICT, authoritative: false, requiresKey: false, pollInterval: 900_000 },
+  firms: { name: 'NASA FIRMS', module: MODULES.ENVIRONMENT, domain: DOMAINS.NATURAL, authoritative: true, requiresKey: true, pollInterval: 600_000 },
   ucdp: { name: 'UCDP Conflict', module: MODULES.CONFLICT, domain: DOMAINS.CONFLICT, authoritative: false, requiresKey: false, pollInterval: 600_000 },
   coingecko: { name: 'CoinGecko', module: MODULES.FINANCIAL, domain: DOMAINS.ECONOMIC, authoritative: false, requiresKey: false, pollInterval: 300_000 },
   'alt-fng': { name: 'Fear & Greed Index', module: MODULES.PREDICTION, domain: DOMAINS.ECONOMIC, authoritative: false, requiresKey: false, pollInterval: 900_000 },

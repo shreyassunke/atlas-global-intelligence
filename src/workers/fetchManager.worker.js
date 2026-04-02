@@ -327,7 +327,49 @@ const NORMALIZERS = {
       }))
   },
 
-  // ── MODULE 2: News (GDELT) ──
+  // ── MODULE 2: GDELT 2.0 Geopolitical Events ──
+  //
+  // The GDELT GKG/Event API now returns pre-geolocated articles. We use a
+  // two-stage fetch: first the GKG GeoJSON feed for coordinates, then the
+  // Doc API for article metadata. Events that lack geo are dropped.
+  // QuadClass mapping: 1=Verbal Coop, 2=Material Coop, 3=Verbal Conflict, 4=Material Conflict
+
+  'gdelt-events': (data) => {
+    if (!data?.features) return []
+    return data.features.slice(0, 60).map(f => {
+      const props = f.properties || {}
+      const coords = f.geometry?.coordinates
+      if (!coords || coords.length < 2) return null
+      const [lng, lat] = coords
+      if (isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) return null
+
+      const name = props.name || props.html || 'Geopolitical Event'
+      const url = props.url || props.shareimage || ''
+      const urlDomain = props.domain || props.sourcecountry || ''
+      const tone = parseFloat(props.tone?.split(',')?.[0] || 0)
+
+      // Map tone to tier/severity (GDELT tone: negative = conflictive, positive = cooperative)
+      let tier = 'latent', severity = 1, domain = 'signals'
+      if (tone <= -5) { tier = 'active'; severity = 3; domain = 'conflict' }
+      else if (tone <= -2) { tier = 'active'; severity = 2; domain = 'conflict' }
+      else if (tone >= 5) { tier = 'latent'; severity = 1; domain = 'signals' }
+
+      const count = parseInt(props.numarts || props.numsources || 1)
+      const corrobCount = Math.min(5, Math.max(1, Math.ceil(count / 3)))
+
+      return makeEvent({
+        id: createEventId(lat, lng, Date.now(), 'gdelt-events', name.substring(0, 60)),
+        tier, domain, lat, lng, severity,
+        corroborationCount: corrobCount,
+        corroborationSources: ['gdelt'], ttl: 900,
+        title: name.length > 120 ? name.substring(0, 117) + '…' : name,
+        detail: `Source: ${urlDomain}. Tone: ${tone.toFixed(1)}. Articles: ${count}.`,
+        source: 'GDELT', sourceUrl: url || 'https://gdeltproject.org',
+        tags: ['geopolitical', 'gdelt', domain],
+        timestamp: new Date().toISOString(),
+      })
+    }).filter(Boolean)
+  },
 
   gdelt: (data) => {
     if (!data?.articles) return []
@@ -803,6 +845,10 @@ const SOURCE_CONFIGS = {
   gdelt: {
     url: 'https://api.gdeltproject.org/api/v2/doc/doc?query=crisis+OR+conflict+OR+earthquake+OR+war&mode=ArtList&maxrecords=20&format=json',
     format: 'json', pollInterval: 300_000,
+  },
+  'gdelt-events': {
+    url: 'https://api.gdeltproject.org/api/v2/geo/geo?query=conflict+OR+war+OR+military+OR+protest+OR+terrorism+OR+sanctions&mode=PointData&format=GeoJSON&timespan=60min&maxrows=60',
+    format: 'json', pollInterval: 900_000,
   },
   ucdp: {
     url: 'https://ucdpapi.pcr.uu.se/api/gedevents/24.1?pagesize=50',

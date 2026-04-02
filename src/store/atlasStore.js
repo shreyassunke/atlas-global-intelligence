@@ -18,6 +18,7 @@ import { loadSpotifyAuthFromStorage, persistSpotifyAuth } from '../music/spotify
 const STORAGE_KEY_SOURCES = 'atlas_selected_sources'
 const STORAGE_KEY_ONBOARDED = 'atlas_onboarded'
 const STORAGE_KEY_BGM_VOL = 'atlas_bgm_volume'
+const STORAGE_KEY_DATA_LAYERS = 'atlas_data_layers'
 /** Legacy key — cleared on reopen so returning users see the landing page first again */
 const STORAGE_KEY_LANDING = 'atlas_landing_ack_v1'
 
@@ -40,6 +41,32 @@ function persistBgmVolume(v) {
   } catch {
     /* ignore */
   }
+}
+
+const DEFAULT_DATA_LAYERS = {
+  gdelt: true,      // Geopolitical events from GDELT 2.0
+  firms: true,      // NASA FIRMS active fires
+  usgs: true,       // USGS earthquakes
+  news: true,       // News articles from commercial APIs
+  gdacs: true,      // GDACS disasters
+  eonet: true,      // NASA EONET natural events
+}
+
+function loadDataLayers() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_DATA_LAYERS)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      return { ...DEFAULT_DATA_LAYERS, ...parsed }
+    }
+  } catch { /* ignore */ }
+  return { ...DEFAULT_DATA_LAYERS }
+}
+
+function persistDataLayers(layers) {
+  try {
+    localStorage.setItem(STORAGE_KEY_DATA_LAYERS, JSON.stringify(layers))
+  } catch { /* ignore */ }
 }
 
 function migrateSources(raw) {
@@ -134,10 +161,18 @@ export const useAtlasStore = create((set, get) => ({
   mobileMode: false,
   lowBandwidthMode: false,
 
+  // ── Data Layers (globe visualization toggles) ──
+  dataLayers: loadDataLayers(),
+
   // ── Auth / User ──
   user: null,
   /** 'auth' | 'sources' — tracks which sub-step of onboarding the user is on */
   onboardingStep: 'auth',
+
+  // ── UI State ──
+  settingsOpen: false,
+  sourcesOpen: false,
+  newsSidebarOpen: false,
 
   // ── Quality & Globe Renderer ──
   /** 'cesium' | 'globegl' | 'leaflet' */
@@ -148,8 +183,6 @@ export const useAtlasStore = create((set, get) => ({
   resolvedTier: savedQuality?.resolved || 'high',
   /** Per-setting overrides (user toggled individual settings) */
   qualityOverrides: savedQuality?.overrides || {},
-  /** Whether settings panel is open */
-  settingsOpen: false,
 
   setNewsItems: (items) => set({ newsItems: items, lastUpdated: new Date(), isLoading: false }),
   setManualRefreshUsedToday: (used) => set({ manualRefreshUsedToday: used }),
@@ -323,6 +356,8 @@ export const useAtlasStore = create((set, get) => ({
     set({ qualityOverrides: {} })
   },
 
+  setSourcesOpen: (v) => set({ sourcesOpen: typeof v === 'function' ? v(get().sourcesOpen) : v }),
+  setNewsSidebarOpen: (v) => set({ newsSidebarOpen: typeof v === 'function' ? v(get().newsSidebarOpen) : v }),
   toggleSettings: () => set((s) => ({ settingsOpen: !s.settingsOpen })),
   setSettingsOpen: (v) => set({ settingsOpen: v }),
 
@@ -446,6 +481,20 @@ export const useAtlasStore = create((set, get) => ({
 
   setMobileMode: (v) => set({ mobileMode: v }),
   setLowBandwidthMode: (v) => set({ lowBandwidthMode: v }),
+
+  // ── Data Layer Toggles ──
+  toggleDataLayer: (layerId) => {
+    const current = get().dataLayers
+    const next = { ...current, [layerId]: !current[layerId] }
+    persistDataLayers(next)
+    set({ dataLayers: next })
+  },
+  setDataLayer: (layerId, enabled) => {
+    const current = get().dataLayers
+    const next = { ...current, [layerId]: enabled }
+    persistDataLayers(next)
+    set({ dataLayers: next })
+  },
 
   // ── Auth Actions ──
   setUser: (user) => set({ user }),

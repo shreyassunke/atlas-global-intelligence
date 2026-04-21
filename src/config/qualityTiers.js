@@ -131,15 +131,17 @@ export function saveQualitySettings(settings) {
 export function loadGlobeMode() {
     try {
         const stored = localStorage.getItem(GLOBE_MODE_STORAGE_KEY)
-        // Heavy 3D globe — use lightweight renderer on small touch devices
-        if (stored === 'cesium' && isMobileDevice()) {
-            return 'globegl'
+        // On touch devices, prefer the lightweight flat Leaflet map over
+        // heavy 3D renderers (Cesium / globe.gl) — much smoother scroll,
+        // lower battery, and far fewer dropped frames on low-end phones.
+        if ((stored === 'cesium' || stored === 'globegl') && isMobileDevice()) {
+            return 'leaflet'
         }
         if (stored) return stored
     } catch {
         /* ignore */
     }
-    return isMobileDevice() ? 'globegl' : 'cesium'
+    return isMobileDevice() ? 'leaflet' : 'cesium'
 }
 
 /**

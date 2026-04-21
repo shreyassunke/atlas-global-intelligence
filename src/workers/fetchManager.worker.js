@@ -208,12 +208,15 @@ const GDELT_GEO_DIM_QUERIES = [
 ]
 
 /**
- * DOC ArtList chain — one request per ATLAS dimension.
+ * DOC ArtList chain — multiple OR-block legs (not one giant query: GDELT returns
+ * an error page for URLs that are too long).
  *
- * Combining all six OR-blocks into a single URL (~700 chars) causes GDELT to
- * return an HTML error page for "query too long", silently yielding zero
- * articles. Splitting also lets the normalizer use an explicit dimension hint
- * instead of falling back to regex-based inference from the headline.
+ * This is still **not** “all of GDELT”: there is no supported single query that
+ * streams the full firehose through the DOC API. The GEO PointData chain
+ * (`gdeltGeoChain` / `NORMALIZERS['gdelt-events']`) would add true lat/lng points,
+ * but `api/v2/geo/geo` has returned HTTP 404 for this project since 2024+ so
+ * that source stays unregistered. Ingest today = DOC legs below + `gdelt-cameo`
+ * (15‑min Events export) + `gdelt-vgkg` (sparse visual GKG samples).
  */
 const GDELT_DOC_DIM_QUERIES = [
   { query: '(conflict OR war OR military OR terror OR attack OR violence OR protest)', dimension: 'safety' },
@@ -222,6 +225,9 @@ const GDELT_DOC_DIM_QUERIES = [
   { query: '(humanitarian OR migration OR refugee OR health OR disease OR hospital OR hunger OR strike OR labor)', dimension: 'people' },
   { query: '(climate OR environment OR pollution OR wildfire OR flood OR storm OR earthquake OR disaster OR renewable)', dimension: 'environment' },
   { query: '(media OR censorship OR journalist OR press OR disinformation OR narrative OR broadcast)', dimension: 'narrative' },
+  // Wider nets — themes underrepresented in the six blocks above (still keyword-filtered).
+  { query: '(cyber OR ransomware OR data breach OR critical infrastructure OR nuclear OR space OR maritime OR aviation OR border OR drone)', dimension: 'safety' },
+  { query: '(education OR university OR research OR culture OR religion OR sport OR technology OR semiconductor OR supply chain OR agriculture)', dimension: 'narrative' },
 ]
 
 const GDELT_DOC_BASE = 'https://api.gdeltproject.org/api/v2/doc/doc'
@@ -1311,10 +1317,9 @@ async function fetchSource(sourceId) {
       const legErrors = []
       for (let i = 0; i < config.gdeltDocChain.length; i++) {
         const { query, dimension } = config.gdeltDocChain[i]
-        // `maxrecords=250` is the DOC API ceiling. We fan out per-dimension so
-        // the union across 6 legs is up to ~1.5k articles, which maps to a
-        // dense field of country-centroid pins even with DOC's country-level
-        // resolution (sourcecountry → centroid).
+        // `maxrecords=250` is the DOC API ceiling. Fan-out per leg; union across
+        // all legs is up to ~(250 × leg count) articles before dedupe in the
+        // normalizer (country-centroid geocode for DOC).
         const docUrl = `${GDELT_DOC_BASE}?query=${encodeURIComponent(query)}&mode=ArtList&maxrecords=250&format=json&sort=DateDesc`
         const controller = new AbortController()
         const timer = setTimeout(() => controller.abort(), GDELT_LEG_TIMEOUT_MS)

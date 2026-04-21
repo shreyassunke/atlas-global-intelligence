@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="56" viewBox="0 0 48 56" fill="none" aria-hidden="true">
+  <!-- Google Earthstyle red teardrop: soft shadow, white rim, dark center hole -->
+  <ellipse cx="24" cy="52" rx="9" ry="3.5" fill="rgba(0,0,0,0.22)"/>
+  <path
+    d="M24 4C15.16 4 8 11.06 8 19.8c0 10.42 12.2 24.62 15.2 28.05a2.8 2.8 0 0 0 4.16.08C30.36 44.5 40 30.22 40 19.8 40 11.06 32.84 4 24 4z"
+    fill="#E94235"
+    stroke="rgba(255,255,255,0.95)"
+    stroke-width="2"
+  />
+  <circle cx="24" cy="19" r="4.2" fill="#2D0A08" stroke="rgba(255,255,255,0.35)" stroke-width="0.8"/>
+</svg>

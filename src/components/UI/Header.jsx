@@ -100,6 +100,7 @@ export default function Header({ hudHidden = false, onToggleHud, onToggleFilters
   const manualRefreshUsedToday = useAtlasStore((s) => s.manualRefreshUsedToday)
   const selectedSources = useAtlasStore((s) => s.selectedSources)
   const openBgmTrackMenu = useAtlasStore((s) => s.openBgmTrackMenu)
+  const mobileMode = useAtlasStore((s) => s.mobileMode)
   const [moreOpen, setMoreOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const moreRef = useRef(null)
@@ -160,35 +161,42 @@ export default function Header({ hudHidden = false, onToggleHud, onToggleFilters
         {/* Right: icon actions */}
         <div className="hud-header-right-zone">
           <div className="hud-header-right">
-          <button
-            onClick={onToggleFilters}
-            className={`hud-icon-btn ${filtersOpen ? 'active' : ''}`}
-            title="Dimension filters"
-          >
-            <IconFilter />
-          </button>
+          {/* On mobile we collapse Filters, Settings and Reset-view into
+              the overflow menu so the header can't overlap on narrow
+              screens. Desktop keeps the full, faster-access icon row. */}
+          {!mobileMode && (
+            <>
+              <button
+                onClick={onToggleFilters}
+                className={`hud-icon-btn ${filtersOpen ? 'active' : ''}`}
+                title="Dimension filters"
+              >
+                <IconFilter />
+              </button>
 
-          <button
-            onClick={toggleSettings}
-            className={`hud-icon-btn ${settingsOpen ? 'active' : ''}`}
-            title="Settings"
-          >
-            <IconSettings />
-          </button>
+              <button
+                onClick={toggleSettings}
+                className={`hud-icon-btn ${settingsOpen ? 'active' : ''}`}
+                title="Settings"
+              >
+                <IconSettings />
+              </button>
 
-          <button
-            type="button"
-            className="hud-icon-btn"
-            onClick={() => resetView()}
-            title="Reset globe to default overview"
-            aria-label="Reset globe view to default overview"
-          >
-            <IconResetView />
-          </button>
+              <button
+                type="button"
+                className="hud-icon-btn"
+                onClick={() => resetView()}
+                title="Reset globe to default overview"
+                aria-label="Reset globe view to default overview"
+              >
+                <IconResetView />
+              </button>
+            </>
+          )}
 
           <HeaderUserMenu />
 
-          <div className="hud-separator" />
+          {!mobileMode && <div className="hud-separator" />}
 
           {/* Overflow menu */}
           <div style={{ position: 'relative' }} ref={moreRef}>
@@ -209,6 +217,25 @@ export default function Header({ hudHidden = false, onToggleHud, onToggleFilters
                   exit={{ opacity: 0, y: -6, scale: 0.96 }}
                   transition={{ duration: 0.15 }}
                 >
+                  {mobileMode && (
+                    <>
+                      <button
+                        className={`hud-dropdown-item ${filtersOpen ? 'is-active' : ''}`}
+                        onClick={() => { onToggleFilters?.(); setMoreOpen(false) }}
+                      >
+                        <IconFilter />
+                        <span>Dimension Filters</span>
+                      </button>
+                      <button
+                        className={`hud-dropdown-item ${settingsOpen ? 'is-active' : ''}`}
+                        onClick={() => { toggleSettings(); setMoreOpen(false) }}
+                      >
+                        <IconSettings />
+                        <span>Settings</span>
+                      </button>
+                      <div className="hud-dropdown-divider" />
+                    </>
+                  )}
                   <button
                     className="hud-dropdown-item"
                     onClick={() => { resetView(); setMoreOpen(false) }}

@@ -2121,6 +2121,11 @@ button.atlas-logo-header-btn:focus-visible {
   cursor: not-allowed;
 }
 
+.hud-dropdown-item.is-active {
+  color: var(--accent);
+  background: rgba(0, 207, 255, 0.08);
+}
+
 .hud-dropdown-item span:first-of-type {
   flex: 1;
 }
@@ -2385,12 +2390,13 @@ button.atlas-logo-header-btn:focus-visible {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  background: rgba(0, 207, 255, 0.14);
-  color: #00cfff;
   flex-shrink: 0;
+}
+
+.search-result-card__pin img {
+  display: block;
+  width: 20px;
+  height: auto;
 }
 
 .search-result-card__title {
@@ -2498,52 +2504,6 @@ button.atlas-logo-header-btn:focus-visible {
     width: auto;
     max-height: 55vh;
   }
-}
-
-/* ── Leaflet (2D fallback) ATLAS reticle place-mark ── */
-.flatmap-search-pin-icon {
-  position: relative;
-  width: 28px;
-  height: 28px;
-  background: transparent !important;
-  border: none !important;
-  pointer-events: none;
-}
-
-/* Centered rings + dot, all anchored on the image center (14,14) so
-   the mark pins exactly to its lat/lng at every zoom level. */
-.flatmap-search-pin-icon__ring,
-.flatmap-search-pin-icon__ring--inner,
-.flatmap-search-pin-icon__dot {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-}
-
-.flatmap-search-pin-icon__ring {
-  width: 20px;
-  height: 20px;
-  border: 1.5px solid rgba(255, 255, 255, 0.92);
-  box-shadow:
-    0 0 0 4px rgba(0, 207, 255, 0.1),
-    0 0 10px rgba(0, 207, 255, 0.35);
-}
-
-.flatmap-search-pin-icon__ring--inner {
-  width: 11px;
-  height: 11px;
-  border: 1px solid rgba(255, 255, 255, 0.45);
-  box-shadow: none;
-}
-
-.flatmap-search-pin-icon__dot {
-  width: 5px;
-  height: 5px;
-  background: #00cfff;
-  border: 0.7px solid rgba(255, 255, 255, 0.9);
-  box-shadow: 0 0 6px rgba(0, 207, 255, 0.75);
 }
 
 /* Filters sidebar */
@@ -3062,46 +3022,80 @@ button.atlas-logo-header-btn:focus-visible {
 /* Mobile optimizations */
 @media (max-width: 768px) {
   .atlas-wordmark--header {
-    height: 18px !important;
+    height: 16px !important;
     width: auto;
   }
 
   .hud-header {
-    height: 38px;
-    padding: 0 6px;
+    height: 44px;
+    padding: 0 8px;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     align-items: center;
-    column-gap: 4px;
+    column-gap: 6px;
   }
 
   .hud-header-left-zone {
     grid-column: 1;
     justify-self: start;
     min-width: 0;
+    gap: 4px;
+  }
+
+  .hud-header-left {
+    gap: 6px;
   }
 
   .hud-header-center-zone {
     grid-column: 2;
     justify-self: center;
-    max-width: min(44vw, 200px);
+    max-width: min(36vw, 160px);
   }
 
   .hud-header-right-zone {
     grid-column: 3;
     justify-self: end;
     min-width: 0;
+    gap: 4px;
+  }
+
+  .hud-header-right {
+    gap: 2px;
   }
 
   .hud-mission-clock__panel-wrap--mobile {
-    top: 40px;
+    top: 46px;
   }
 
   .hud-icon-btn {
-    width: 38px;
-    height: 38px;
-    min-width: 38px;
-    min-height: 38px;
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
+  }
+
+  /* When the place-search expands on mobile, overlay the whole header
+     so it never collides with the clock or right-hand action cluster. */
+  .hud-search.is-open {
+    position: static;
+  }
+
+  .hud-search.is-open .hud-search-field {
+    position: fixed !important;
+    top: 4px;
+    left: 8px;
+    right: 8px;
+    width: auto !important;
+    max-width: none !important;
+    height: 36px;
+    z-index: 45;
+  }
+
+  .hud-search-dropdown {
+    left: 8px;
+    right: 8px;
+    width: auto;
+    max-width: none;
   }
 
   .hud-filters-sidebar {
@@ -3191,6 +3185,21 @@ button.atlas-logo-header-btn:focus-visible {
   .hud-dropdown-item {
     min-height: 44px;
     padding: 10px 16px;
+  }
+}
+
+/* Narrow touch devices (phones): tighten the header icon hit-target so
+   the full 5-zone header never overflows the viewport. The mobile block
+   above sets 36×36; this override wins over the generic touch rule which
+   forces 44×44 on any coarse pointer. */
+@media (max-width: 768px) and (hover: none) and (pointer: coarse) {
+  .hud-header .hud-icon-btn,
+  .hud-header-right .hud-icon-btn,
+  .hud-header-left .hud-icon-btn {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
   }
 }
 

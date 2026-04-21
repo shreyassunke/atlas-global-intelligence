@@ -32,6 +32,7 @@ import {
 import { buildGdeltDocQuery } from '../../services/gdelt/analyticsService'
 import useGdeltGeoOverlay from '../../hooks/useGdeltGeoOverlay'
 import { toneToChoroplethRgba } from '../../services/gdelt/geoService'
+import { PLACE_SEARCH_PIN_SRC } from '../../constants/placeSearchPin'
 
 const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ''
 
@@ -45,6 +46,8 @@ const STARTUP_ORBIT_RANGE_M = 24_000_000
 const INTRO_DURATION_MS = 3000
 /** 0 = top-down (nadir), matching the in-app “globe disk” overview reference. */
 const STARTUP_ORBIT_TILT = 0
+/** Fly-to / search framing: classic Google Earth nadir (north-up, perpendicular to terrain). */
+const FLY_TO_NADIR_TILT = 0
 
 /**
  * Max event age (ms) to plot on the globe for each HUD `timeFilter` tier.
@@ -244,60 +247,10 @@ function geoJsonToOuterRings(geometry) {
     .filter((ring) => ring.length >= 3)
 }
 
-/**
- * ATLAS place-mark head: a minimal HUD reticle — outer white ring,
- * inner faint ring, cyan accent dot. The sprite is perfectly symmetric
- * around the canvas center so `Marker3D` anchors it cleanly to its
- * 3D position. In-world it sits 140 m above the lat/lng with a cyan
- * stem linking it to the ground, so as the camera tilts/zooms/orbits
- * the whole assembly moves together and the user's eye always tracks
- * the stem's ground contact — no parallax swim like a sprite-only pin.
- */
-let _searchMarkSprite = null
-function searchMarkIconDataUrl() {
-  if (_searchMarkSprite) return _searchMarkSprite
-  const size = 64
-  const dpr = 2
-  const c = document.createElement('canvas')
-  c.width = size * dpr
-  c.height = size * dpr
-  const ctx = c.getContext('2d')
-  ctx.scale(dpr, dpr)
-
-  const cx = size / 2
-  const cy = size / 2
-
-  // Outer cyan halo — soft glow so the head reads above the stem.
-  ctx.beginPath()
-  ctx.arc(cx, cy, 12, 0, Math.PI * 2)
-  ctx.fillStyle = 'rgba(0, 207, 255, 0.12)'
-  ctx.fill()
-
-  // Outer white ring — the primary visual anchor.
-  ctx.beginPath()
-  ctx.arc(cx, cy, 9, 0, Math.PI * 2)
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.94)'
-  ctx.lineWidth = 1.6
-  ctx.stroke()
-
-  // Inner faint ring — adds HUD depth without shouting.
-  ctx.beginPath()
-  ctx.arc(cx, cy, 5, 0, Math.PI * 2)
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.42)'
-  ctx.lineWidth = 1
-  ctx.stroke()
-
-  // Center dot — ATLAS accent cyan, outlined for crispness on any basemap.
-  ctx.beginPath()
-  ctx.arc(cx, cy, 2.2, 0, Math.PI * 2)
-  ctx.fillStyle = 'rgba(0, 207, 255, 1)'
-  ctx.fill()
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)'
-  ctx.lineWidth = 0.7
-  ctx.stroke()
-
-  _searchMarkSprite = c.toDataURL('image/png')
-  return _searchMarkSprite
+function truncatePlaceLabel(s, maxLen = 72) {
+  if (!s || typeof s !== 'string') return ''
+  const t = s.trim()
+  return t.length <= maxLen ? t : `${t.slice(0, maxLen - 1)}…`
 }
 
 function nuclearIconDataUrl() {
@@ -419,13 +372,7 @@ function InnerMap({ onGlobeReady }) {
   const maps3dLib = useMapsLibrary('maps3d')
   const vectorLayersReady = Boolean(maps3dLib)
 
-  const staticIcons = useMemo(
-    () => ({
-      nuclear: nuclearIconDataUrl(),
-      searchPin: searchMarkIconDataUrl(),
-    }),
-    [],
-  )
+  const staticIcons = useMemo(() => ({ nuclear: nuclearIconDataUrl() }), [])
 
   const searchHighlight = useAtlasStore((s) => s.searchHighlight)
   const readyRef = useRef(false)
@@ -580,8 +527,8 @@ function InnerMap({ onGlobeReady }) {
       endCamera: {
         center: { lat, lng, altitude: 0 },
         range: nextRange,
-        heading: cam.heading ?? 0,
-        tilt: Math.min(65, Math.max(0, cam.tilt ?? STARTUP_ORBIT_TILT)),
+        heading: 0,
+        tilt: FLY_TO_NADIR_TILT,
         roll: 0,
       },
       durationMillis: 1400,
@@ -754,11 +701,12 @@ function InnerMap({ onGlobeReady }) {
         const lngSpanDeg = Math.abs(viewport.east - viewport.west)
         const cosLat = Math.max(0.15, Math.abs(Math.cos((lat * Math.PI) / 180)))
         // Convert the larger of the two spans to meters, then pad so the
-        // bbox sits well inside the viewport at the chosen tilt.
+        // bbox sits well inside the viewport at nadir (tilt 0 shows more
+        // ground than an oblique tilt for the same range — slightly tighter mult).
         const latSpanM = latSpanDeg * 111_000
         const lngSpanM = lngSpanDeg * 111_000 * cosLat
         const maxSpanM = Math.max(latSpanM, lngSpanM)
-        range = Math.max(1500, Math.min(RANGE_MAX_M * 0.5, maxSpanM * 2.3))
+        range = Math.max(1500, Math.min(RANGE_MAX_M * 0.5, maxSpanM * 2.0))
       } else {
         range = 22_000
       }
@@ -769,7 +717,7 @@ function InnerMap({ onGlobeReady }) {
           center: { lat, lng, altitude: 0 },
           range,
           heading: 0,
-          tilt: 45,
+          tilt: FLY_TO_NADIR_TILT,
           roll: 0,
         },
         durationMillis: 1500,
@@ -1052,48 +1000,31 @@ function InnerMap({ onGlobeReady }) {
           ))}
 
         {searchHighlight && Number.isFinite(searchHighlight.lat) && Number.isFinite(searchHighlight.lng) && (
-          <React.Fragment key="atlas-search-highlight-group">
+          <Marker3D
+            key="atlas-search-highlight-pin"
+            position={{ lat: searchHighlight.lat, lng: searchHighlight.lng, altitude: 120 }}
+            altitudeMode={AltitudeMode.RELATIVE_TO_GROUND}
+            label={searchHighlight.label ? truncatePlaceLabel(searchHighlight.label) : undefined}
+            drawsWhenOccluded
+            sizePreserved
+            collisionBehavior={CollisionBehavior.REQUIRED_AND_HIDES_OPTIONAL}
+            zIndex={10000}
+          >
             {/*
-             * ATLAS place-mark is a head + stem. The stem is a real 3D
-             * polyline from the terrain surface up to the reticle, both
-             * endpoints using RELATIVE_TO_GROUND so the whole assembly
-             * rides the terrain as tiles stream in — no parallax drift
-             * like CLAMP_TO_GROUND would cause, and the user always sees
-             * the stem touching the exact ground point under camera
-             * tilt/zoom/orbit.
-             */}
-            {createElement('gmp-polyline-3d', {
-              key: 'atlas-search-stem',
-              altitudeMode: AltitudeMode.RELATIVE_TO_GROUND,
-              strokeColor: 'rgba(0, 207, 255, 0.85)',
-              strokeWidth: 2,
-              outerColor: 'rgba(0, 207, 255, 0.18)',
-              outerWidth: 1,
-              drawsOccludedSegments: true,
-              coordinates: [
-                { lat: searchHighlight.lat, lng: searchHighlight.lng, altitude: 0 },
-                { lat: searchHighlight.lat, lng: searchHighlight.lng, altitude: 140 },
-              ],
-            })}
-            <Marker3D
-              key="atlas-search-highlight-pin"
-              position={{ lat: searchHighlight.lat, lng: searchHighlight.lng, altitude: 140 }}
-              altitudeMode={AltitudeMode.RELATIVE_TO_GROUND}
-              drawsWhenOccluded
-              sizePreserved
-              collisionBehavior={CollisionBehavior.REQUIRED}
-              zIndex={1000}
-            >
-              <img
-                src={staticIcons.searchPin}
-                width={24}
-                height={24}
-                alt=""
-                draggable={false}
-                style={{ pointerEvents: 'none' }}
-              />
-            </Marker3D>
-          </React.Fragment>
+              Single <img> child: gmp-marker-3d expects img/svg in <template>;
+              a plain <div> label sibling can prevent the pin from drawing. Use
+              `label` above for the place title. REQUIRED_AND_HIDES_OPTIONAL keeps
+              this pin above optional basemap POI glyphs that were hiding it.
+            */}
+            <img
+              src={PLACE_SEARCH_PIN_SRC}
+              width={48}
+              height={56}
+              alt=""
+              draggable={false}
+              style={{ pointerEvents: 'none', display: 'block' }}
+            />
+          </Marker3D>
         )}
 
         {NUCLEAR_FACILITIES.map((nf) => (

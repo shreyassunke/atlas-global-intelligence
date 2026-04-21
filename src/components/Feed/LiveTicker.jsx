@@ -162,6 +162,13 @@ export default function LiveTicker() {
     hoverTimer.current = setTimeout(() => setFeedOpen(true), 200)
   }, [mobileMode])
 
+  /** Clears the delayed open timer so a pending hover cannot reopen right after an explicit close. */
+  const closeFeed = useCallback(() => {
+    clearTimeout(hoverTimer.current)
+    hoverTimer.current = null
+    setFeedOpen(false)
+  }, [])
+
   useEffect(() => () => clearTimeout(hoverTimer.current), [])
 
   // Close only via ✕ or pointerdown outside the dock (overlay + ticker). Do not use mouseleave —
@@ -172,12 +179,12 @@ export default function LiveTicker() {
     function onPointerDownCapture(e) {
       const root = dockRef.current
       if (!root || root.contains(e.target)) return
-      setFeedOpen(false)
+      closeFeed()
     }
 
     window.addEventListener('pointerdown', onPointerDownCapture, true)
     return () => window.removeEventListener('pointerdown', onPointerDownCapture, true)
-  }, [feedOpen])
+  }, [feedOpen, closeFeed])
 
   useEffect(() => {
     const el = scrollRef.current
@@ -210,7 +217,7 @@ export default function LiveTicker() {
       setSelectedMarker(item.news)
       setSelectedEvent(null)
     }
-    setFeedOpen(false)
+    closeFeed()
   }
 
   return (
@@ -250,7 +257,7 @@ export default function LiveTicker() {
                   aria-label="Search feed"
                 />
               </div>
-              <button type="button" className="feed-close-btn" onClick={() => setFeedOpen(false)}>✕</button>
+              <button type="button" className="feed-close-btn" onClick={(e) => { e.stopPropagation(); closeFeed() }}>✕</button>
             </div>
 
             <div className="feed-tabs-row">
@@ -332,7 +339,15 @@ export default function LiveTicker() {
 
       {mobileMode && (
         <button
-          onClick={() => setFeedOpen((v) => !v)}
+          onClick={() => {
+            setFeedOpen((v) => {
+              if (v) {
+                clearTimeout(hoverTimer.current)
+                hoverTimer.current = null
+              }
+              return !v
+            })
+          }}
           className="absolute -top-8 left-1/2 -translate-x-1/2 z-10 bg-black/60 border border-white/10 rounded-full px-3 py-1 text-[8px] tracking-[0.2em] text-white/50 uppercase font-mono backdrop-blur-sm"
         >
           {feedOpen ? 'Close Feed' : 'Open Feed'}

@@ -13,23 +13,7 @@
  */
 import { AnimatePresence, motion } from 'framer-motion'
 import { useAtlasStore } from '../../store/atlasStore'
-
-const IconPin = () => (
-  <svg
-    width="14"
-    height="14"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    aria-hidden
-  >
-    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
-    <circle cx="12" cy="10" r="3" />
-  </svg>
-)
+import { PLACE_SEARCH_PIN_SRC } from '../../constants/placeSearchPin'
 
 const IconClose = () => (
   <svg
@@ -68,7 +52,13 @@ export default function SearchResultCard() {
           <header className="search-result-card__header">
             <div className="search-result-card__title-row">
               <span className="search-result-card__pin" aria-hidden>
-                <IconPin />
+                <img
+                  src={PLACE_SEARCH_PIN_SRC}
+                  width={20}
+                  height={23}
+                  alt=""
+                  draggable={false}
+                />
               </span>
               <h3 className="search-result-card__title" title={highlight.label || ''}>
                 {highlight.label || 'Selected place'}

@@ -16,6 +16,7 @@ import useGdeltGeoOverlay from '../../hooks/useGdeltGeoOverlay'
 import { toneToChoroplethRgba } from '../../services/gdelt/geoService'
 import { DIMENSION_COLORS } from '../../core/eventSchema'
 import { eventSourceToGlobeDataLayerKey } from '../../core/globeLayers'
+import { PLACE_SEARCH_PIN_SRC } from '../../constants/placeSearchPin'
 
 // Dark tile layer matching Atlas design
 const TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
@@ -198,25 +199,17 @@ function SearchFlyToHandler() {
     return null
 }
 
-/**
- * ATLAS reticle `divIcon`: concentric white rings around a cyan dot,
- * matching the 3D globe sprite. Symmetric around the center so the
- * icon anchor is `[size/2, size/2]` — the mark pins exactly at the
- * lat/lng with no tip offset, so scrolling/zooming can't make it
- * visually drift off the address.
- */
+/** Same red teardrop as Map3D (`/public/markers/place-search-pin.svg`). */
+const FLATMAP_PIN_W = 40
+const FLATMAP_PIN_H = Math.round((FLATMAP_PIN_W * 56) / 48)
 const _searchPinIconCache = { icon: null }
 function getSearchPinIcon() {
     if (_searchPinIconCache.icon) return _searchPinIconCache.icon
-    _searchPinIconCache.icon = L.divIcon({
-        className: 'flatmap-search-pin-icon',
-        html:
-            '<span class="flatmap-search-pin-icon__ring"></span>' +
-            '<span class="flatmap-search-pin-icon__ring flatmap-search-pin-icon__ring--inner"></span>' +
-            '<span class="flatmap-search-pin-icon__dot"></span>',
-        iconSize: [28, 28],
-        iconAnchor: [14, 14],
-        popupAnchor: [0, -14],
+    _searchPinIconCache.icon = L.icon({
+        iconUrl: PLACE_SEARCH_PIN_SRC,
+        iconSize: [FLATMAP_PIN_W, FLATMAP_PIN_H],
+        iconAnchor: [FLATMAP_PIN_W / 2, FLATMAP_PIN_H],
+        popupAnchor: [0, -FLATMAP_PIN_H],
     })
     return _searchPinIconCache.icon
 }

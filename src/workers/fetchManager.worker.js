@@ -1,6 +1,11 @@
 import { fetchGdeltCameoEvents } from '../services/gdelt/eventService.js'
 import { fetchGdeltJson, fetchGdeltText } from '../services/gdelt/gdeltHttp.js'
 import { fetchVgkgImagerySample } from '../services/gdelt/vgkgService.js'
+import { isMilitaryIcao24 } from '../core/militaryIcao.js'
+import { parseTleCatalog } from '../core/satellitePropagation.js'
+import { classifySatellitePurpose } from '../core/satellitePurpose.js'
+import { PRIORITY_FETCH_SOURCES } from '../core/atlasBootstrap.js'
+import { fetchNhcStormsBundle } from '../core/fetchNhcStorms.js'
 
 // #region agent log
 try { fetch('http://127.0.0.1:7897/ingest/4068bc9a-6323-4a56-a79a-75d6b868c769',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'894d50'},body:JSON.stringify({sessionId:'894d50',location:'fetchManager.worker.js:1',message:'L1 worker module loaded',data:{ua:typeof self!=='undefined'?String(self.constructor?.name||''):'?'},hypothesisId:'H1',timestamp:Date.now()})}).catch(()=>{}) } catch(e){}
@@ -20,6 +25,8 @@ function getState(moduleId) {
       timer: null,
       active: false,
       errorCount: 0,
+      lastError: null,
+      lastWarning: null,
     }
   }
   return moduleState[moduleId]
@@ -88,6 +95,44 @@ function makeEvent(fields) {
     source: fields.source || '',
     sourceUrl: fields.sourceUrl || '',
     tags: fields.tags || [],
+    ...(fields.toneScore != null ? { toneScore: fields.toneScore } : {}),
+    ...(fields.actor1 ? { actor1: fields.actor1 } : {}),
+    ...(fields.actor2 ? { actor2: fields.actor2 } : {}),
+    ...(fields.locationName ? { locationName: fields.locationName } : {}),
+    // Phase 1 — tactical track fields (ADS-B / TLE)
+    ...(fields.trackKind ? { trackKind: fields.trackKind } : {}),
+    ...(fields.icao24 ? { icao24: fields.icao24 } : {}),
+    ...(fields.callsign ? { callsign: fields.callsign } : {}),
+    ...(fields.altitudeM != null ? { altitudeM: fields.altitudeM } : {}),
+    ...(fields.velocityMs != null ? { velocityMs: fields.velocityMs } : {}),
+    ...(fields.trackDeg != null ? { trackDeg: fields.trackDeg } : {}),
+    ...(fields.originCountry ? { originCountry: fields.originCountry } : {}),
+    ...(fields.isMilitary != null ? { isMilitary: fields.isMilitary } : {}),
+    ...(fields.noradId != null ? { noradId: fields.noradId } : {}),
+    ...(fields.satelliteGroup ? { satelliteGroup: fields.satelliteGroup } : {}),
+    ...(fields.tleLine1 ? { tleLine1: fields.tleLine1 } : {}),
+    ...(fields.tleLine2 ? { tleLine2: fields.tleLine2 } : {}),
+    ...(fields.satellitePurpose ? { satellitePurpose: fields.satellitePurpose } : {}),
+    ...(fields.satellitePurposeLabel ? { satellitePurposeLabel: fields.satellitePurposeLabel } : {}),
+    ...(fields.satellitePurposeDetail ? { satellitePurposeDetail: fields.satellitePurposeDetail } : {}),
+    ...(fields.satelliteOperator ? { satelliteOperator: fields.satelliteOperator } : {}),
+    // Phase 3 — maritime / storm fields
+    ...(fields.mmsi ? { mmsi: fields.mmsi } : {}),
+    ...(fields.sog != null ? { sog: fields.sog } : {}),
+    ...(fields.cog != null ? { cog: fields.cog } : {}),
+    ...(fields.shipName ? { shipName: fields.shipName } : {}),
+    ...(fields.stormId ? { stormId: fields.stormId } : {}),
+    ...(fields.stormCategory ? { stormCategory: fields.stormCategory } : {}),
+    ...(fields.trackCoords ? { trackCoords: fields.trackCoords } : {}),
+    ...(fields.coneCoords ? { coneCoords: fields.coneCoords } : {}),
+    // Phase 6 — stretch signals
+    ...(fields.imageUrl ? { imageUrl: fields.imageUrl } : {}),
+    ...(fields.visualLabels ? { visualLabels: fields.visualLabels } : {}),
+    ...(fields.socialReach ? { socialReach: fields.socialReach } : {}),
+    ...(fields.blueskyUri ? { blueskyUri: fields.blueskyUri } : {}),
+    ...(fields.factCheckRating ? { factCheckRating: fields.factCheckRating } : {}),
+    ...(fields.factCheckPublisher ? { factCheckPublisher: fields.factCheckPublisher } : {}),
+    ...(fields.factCheckUrl ? { factCheckUrl: fields.factCheckUrl } : {}),
   }
 }
 
@@ -756,6 +801,174 @@ const NORMALIZERS = {
     })
   },
 
+  // ── Phase 1: OpenSky Network ADS-B ($0 — anon 10s poll, registered 5s) ──
+
+  opensky: (data) => {
+    const states = data?.states
+    if (!Array.isArray(states) || states.length === 0) return []
+    const events = []
+    for (const st of states) {
+      if (!Array.isArray(st) || st.length < 11) continue
+      const icao24 = (st[0] || '').toLowerCase()
+      const callsign = (st[1] || '').trim()
+      const originCountry = st[2] || ''
+      const lng = st[5]
+      const lat = st[6]
+      const baroAlt = st[7]
+      const onGround = st[8]
+      const velocity = st[9]
+      const track = st[10]
+      if (onGround || lat == null || lng == null) continue
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue
+      const mil = isMilitaryIcao24(icao24)
+      const altM = baroAlt != null ? Math.round(baroAlt) : null
+      const velMs = velocity != null ? Math.round(velocity) : null
+      const trackDeg = track != null ? Math.round(track) : 0
+      const csLabel = callsign || icao24.toUpperCase()
+      events.push(makeEvent({
+        id: createEventId(0, 0, 0, 'opensky', icao24),
+        priority: mil ? 'p2' : 'p3',
+        dimension: 'narrative',
+        lat, lng,
+        severity: mil ? 2 : 1,
+        corroborationSources: ['opensky'],
+        ttl: 30,
+        title: mil ? `MIL ${csLabel}` : csLabel,
+        detail: [
+          altM != null ? `Alt ${(altM * 3.281).toFixed(0)} ft` : null,
+          velMs != null ? `${Math.round(velMs * 1.944)} kts` : null,
+          trackDeg != null ? `Hdg ${trackDeg}°` : null,
+          originCountry ? `Origin ${originCountry}` : null,
+        ].filter(Boolean).join(' · '),
+        source: 'OpenSky Network',
+        sourceUrl: 'https://opensky-network.org',
+        tags: ['adsb', 'aircraft', mil ? 'military' : 'civil'],
+        trackKind: 'aircraft',
+        icao24,
+        callsign,
+        altitudeM: altM,
+        velocityMs: velMs,
+        trackDeg,
+        originCountry,
+        isMilitary: mil,
+      }))
+    }
+    return events.slice(0, 800)
+  },
+
+  // ── Phase 1: CelesTrak TLE catalogs ($0 — no key, reasonable-use polling) ──
+
+  'celestrak-tle': (entries) => {
+    if (!Array.isArray(entries) || entries.length === 0) return []
+    const now = Date.now()
+    return entries.slice(0, 600).map((entry) => {
+      const name = entry.name || 'Satellite'
+      const noradId = entry.noradId ?? 0
+      const group = entry._atlasGroup || 'active'
+      const mil = group === 'military'
+      const purposeInfo = classifySatellitePurpose({ name, satelliteGroup: group, isMilitary: mil })
+      const opSuffix = purposeInfo.operator ? ` · ${purposeInfo.operator}` : ''
+      return makeEvent({
+        id: createEventId(0, 0, 0, 'celestrak-tle', String(noradId)),
+        priority: group === 'stations' ? 'p2' : 'p3',
+        dimension: 'environment',
+        lat: 0,
+        lng: 0,
+        latApproximate: false,
+        severity: group === 'stations' ? 2 : 1,
+        corroborationSources: ['celestrak-tle'],
+        ttl: 7200,
+        title: name,
+        detail: `${purposeInfo.label}${opSuffix} · NORAD ${noradId} · ${group} catalog`,
+        source: 'CelesTrak TLE',
+        sourceUrl: 'https://celestrak.org',
+        tags: ['space', 'satellite', group, purposeInfo.purpose].filter(Boolean),
+        trackKind: 'satellite',
+        noradId,
+        satelliteGroup: group,
+        isMilitary: mil,
+        satellitePurpose: purposeInfo.purpose,
+        satellitePurposeLabel: purposeInfo.label,
+        satellitePurposeDetail: purposeInfo.detail,
+        satelliteOperator: purposeInfo.operator,
+        tleLine1: entry.line1,
+        tleLine2: entry.line2,
+      })
+    })
+  },
+
+  // ── Phase 3: AISStream vessel positions ($0 free tier — server WebSocket proxy) ──
+
+  aisstream: (data) => {
+    const vessels = data?.vessels
+    if (!Array.isArray(vessels) || vessels.length === 0) return []
+    return vessels.slice(0, 400).map((v) => {
+      const mmsi = String(v.mmsi || '')
+      const cog = v.cog != null ? Math.round(v.cog) : 0
+      const sogKn = v.sog != null ? (v.sog / 10).toFixed(1) : null
+      const name = (v.shipName || '').trim() || `MMSI ${mmsi}`
+      return makeEvent({
+        id: createEventId(v.lat, v.lng, Date.now(), 'aisstream', mmsi),
+        priority: 'p3',
+        dimension: 'economy',
+        lat: v.lat,
+        lng: v.lng,
+        severity: 1,
+        corroborationSources: ['aisstream'],
+        ttl: 120,
+        title: name,
+        detail: [
+          sogKn != null ? `${sogKn} kn` : null,
+          cog != null ? `COG ${cog}°` : null,
+          `MMSI ${mmsi}`,
+        ].filter(Boolean).join(' · '),
+        source: 'AISStream',
+        sourceUrl: 'https://aisstream.io',
+        tags: ['maritime', 'ais', 'vessel'],
+        trackKind: 'vessel',
+        mmsi,
+        cog,
+        sog: v.sog != null ? v.sog / 10 : null,
+        shipName: v.shipName || '',
+      })
+    })
+  },
+
+  // ── Phase 3: NOAA NHC active tropical cyclones ($0 RSS/KML, no key) ──
+
+  'noaa-nhc': (data) => {
+    const storms = data?.storms
+    if (!Array.isArray(storms) || storms.length === 0) return []
+    return storms.map((s) => {
+      const track = s.trackCoords || []
+      const cone = s.coneCoords || []
+      const centerLat = s.centerLat ?? track[track.length - 1]?.lat ?? 0
+      const centerLng = s.centerLng ?? track[track.length - 1]?.lng ?? 0
+      const cat = s.category || 'TC'
+      const sev = /hurricane|typhoon/i.test(cat) ? 4 : /storm/i.test(cat) ? 3 : 2
+      return makeEvent({
+        id: createEventId(centerLat, centerLng, Date.now(), 'noaa-nhc', s.stormId || s.name),
+        priority: sev >= 4 ? 'p1' : 'p2',
+        dimension: 'environment',
+        lat: centerLat,
+        lng: centerLng,
+        severity: sev,
+        corroborationSources: ['noaa-nhc'],
+        ttl: 3600,
+        title: `${s.name || s.stormId} (${cat})`,
+        detail: `NOAA/NHC active cyclone · ${track.length} track points · ${cone.length ? 'cone available' : 'track only'}`,
+        source: 'NOAA NHC',
+        sourceUrl: 'https://www.nhc.noaa.gov',
+        tags: ['weather', 'hurricane', 'nhc', cat.toLowerCase()],
+        trackKind: 'storm',
+        stormId: s.stormId,
+        stormCategory: cat,
+        trackCoords: track,
+        coneCoords: cone,
+      })
+    })
+  },
+
   // ── Open-Meteo (extreme weather for key cities) ──
 
   'open-meteo': (data) => {
@@ -1001,6 +1214,76 @@ const NORMALIZERS = {
       tags: ['energy', 'grid'],
     })]
   },
+
+  // ── Phase 6 stretch: Bluesky Jetstream social signals ($0, no key) ──
+
+  bluesky: (data) => {
+    const posts = data?.posts
+    if (!Array.isArray(posts) || posts.length === 0) return []
+    return posts.slice(0, 60).map((p) => {
+      const ts = p.createdAt || new Date().toISOString()
+      const engagement = (p.likes || 0) + (p.reposts || 0) * 2 + (p.replies || 0)
+      const sev = engagement > 50 ? 3 : engagement > 10 ? 2 : 1
+      return makeEvent({
+        id: createEventId(p.lat, p.lng, new Date(ts).getTime(), 'bluesky', p.uri || p.text?.slice(0, 40)),
+        priority: sev >= 3 ? 'p2' : 'p3',
+        dimension: 'narrative',
+        lat: p.lat,
+        lng: p.lng,
+        latApproximate: true,
+        severity: sev,
+        corroborationSources: ['bluesky'],
+        ttl: 1800,
+        title: p.text?.slice(0, 120) || 'Bluesky post',
+        detail: p.text?.slice(0, 280) || '',
+        source: 'Bluesky',
+        sourceUrl: p.uri ? `https://bsky.app/profile/${encodeURIComponent(p.author || '')}/post/${p.uri.split('/').pop()}` : 'https://bsky.app',
+        tags: ['bluesky', 'social', p.locationName?.toLowerCase()].filter(Boolean),
+        locationName: p.locationName || null,
+        timestamp: ts,
+        socialReach: {
+          likes: p.likes || 0,
+          reposts: p.reposts || 0,
+          replies: p.replies || 0,
+          mentionCount: 1,
+        },
+        blueskyUri: p.uri || '',
+      })
+    })
+  },
+
+  // ── Phase 6 stretch: Google Fact Check Tools ($0 with server API key) ──
+
+  'fact-check': (data) => {
+    const claims = data?.claims
+    if (!Array.isArray(claims) || claims.length === 0) return []
+    return claims.filter((c) => c.lat != null && c.lng != null).slice(0, 20).map((c) => {
+      const ts = c.reviewDate || new Date().toISOString()
+      const isHighPriority = /false|misleading|pants|incorrect|debunked/i.test(c.rating || '')
+      return makeEvent({
+        id: createEventId(c.lat, c.lng, new Date(ts).getTime(), 'fact-check', c.claim?.slice(0, 40)),
+        priority: isHighPriority ? 'p2' : 'p3',
+        dimension: 'narrative',
+        lat: c.lat,
+        lng: c.lng,
+        latApproximate: c.latApproximate !== false,
+        severity: isHighPriority ? 3 : 2,
+        authoritative: true,
+        corroborationSources: ['fact-check'],
+        ttl: 86400,
+        title: c.claim?.slice(0, 120) || 'Fact-checked claim',
+        detail: `${c.publisher}: ${c.rating}`,
+        source: 'Google Fact Check',
+        sourceUrl: c.publisherUrl || 'https://toolbox.google.com/factcheck/apis',
+        tags: ['fact-check', 'claimreview'],
+        locationName: c.locationName || null,
+        timestamp: ts,
+        factCheckRating: c.rating || 'Reviewed',
+        factCheckPublisher: c.publisher || 'Unknown',
+        factCheckUrl: c.publisherUrl || '',
+      })
+    })
+  },
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1038,11 +1321,9 @@ const SOURCE_CONFIGS = {
     gdeltDocChain: GDELT_DOC_DIM_QUERIES,
   },
   // `gdelt-events` (GDELT GEO 2.0 API — PointData/GeoJSON) is disabled: the
-  // `https://api.gdeltproject.org/api/v2/geo/geo` endpoint currently returns
-  // HTTP 404 for every query (including the examples from GDELT's own docs)
-  // while the upstream service is down. Leaving the source active just
-  // burned the shared rate-limit budget with failing legs, which is what
-  // starved the DOC chain and left the globe empty. Re-enable once GDELT
+  // `https://api.gdeltproject.org/api/v2/geo/geo` endpoint still returns HTTP
+  // 404 as of 2026-05-21 (re-tested in Phase 0). Leaving the source active
+  // burns the shared rate-limit budget with failing legs. Re-enable once GDELT
   // restores the GEO endpoint.
   'gdelt-cameo': {
     // GDELT publishes a new 15-minute `.export.CSV.zip` every quarter hour;
@@ -1089,6 +1370,48 @@ const SOURCE_CONFIGS = {
   'open-meteo': {
     url: 'https://api.open-meteo.com/v1/forecast?latitude=35.68,51.51,40.71,48.86,55.75,28.61,31.23,23.13,-33.87,19.43,30.04,33.69,37.57,34.05,41.01&longitude=139.69,-0.13,-74.01,2.35,37.62,77.21,121.47,113.26,151.21,-99.13,31.24,73.06,126.98,-118.24,28.98&current_weather=true',
     format: 'json', pollInterval: 600_000,
+  },
+  // Phase 1 — OpenSky ADS-B: $0 anon ~15s poll (same-origin proxy + server cache)
+  opensky: {
+    url: '/api/opensky-states',
+    format: 'json',
+    pollInterval: 15_000,
+  },
+  // Phase 1 — CelesTrak SOCRATES close approaches
+  celestrak: {
+    url: 'https://celestrak.org/SOCRATES/data/search.php?MAX=10&FORMAT=json',
+    format: 'json',
+    pollInterval: 3_600_000,
+  },
+  // Phase 1 — CelesTrak TLE catalogs (multi-group fetch in fetchSource)
+  'celestrak-tle': {
+    format: 'text',
+    pollInterval: 3_600_000,
+    tleGroups: ['active', 'stations', 'starlink', 'gps-ops', 'military'],
+  },
+  // Phase 3 — AISStream.io ships via server WebSocket proxy ($0, registration only)
+  aisstream: {
+    url: '/api/aisstream-ships',
+    format: 'json',
+    pollInterval: 45_000,
+  },
+  // Phase 3 — NOAA NHC active storm tracks + cone-of-error ($0, no key — worker fetches direct)
+  'noaa-nhc': {
+    format: 'json',
+    pollInterval: 300_000,
+    directFetch: true,
+  },
+  // Phase 6 — Bluesky Jetstream social reach ($0, no key — server WS proxy ~8s collect)
+  bluesky: {
+    url: '/api/bluesky-posts',
+    format: 'json',
+    pollInterval: 60_000,
+  },
+  // Phase 6 — Google Fact Check Tools ($0 with GOOGLE_FACT_CHECK_API_KEY server-side)
+  'fact-check': {
+    url: '/api/fact-check-claims?proactive=1',
+    format: 'json',
+    pollInterval: 900_000,
   },
 }
 
@@ -1272,6 +1595,10 @@ async function fetchSource(sourceId) {
           source: 'GDELT',
           sourceUrl: row.sourceUrl || 'https://www.gdeltproject.org',
           tags: ['gdelt', 'cameo', `cameo${row.cameoRoot || ''}`, typeof row.quadClass === 'number' ? `qc${row.quadClass}` : ''].filter(Boolean),
+          toneScore: row.toneScore,
+          actor1: row.actor1,
+          actor2: row.actor2,
+          locationName: row.locationName,
           timestamp: new Date(ts).toISOString(),
           // Keep CAMEO rows alive for 2 hours — matches the "Live" HUD window
           // (`TIME_FILTER_MAX_AGE_MS.live`) so the globe always shows a dense,
@@ -1287,6 +1614,79 @@ async function fetchSource(sourceId) {
       return events
     } catch (err) {
       state.errorCount++
+      state.backoff = Math.min(state.backoff * 2, MAX_BACKOFF)
+      self.postMessage({
+        type: 'SOURCE_ERROR',
+        sourceId,
+        error: err.message,
+        nextRetry: state.backoff,
+      })
+      return []
+    }
+  }
+
+  if (sourceId === 'noaa-nhc') {
+    try {
+      const storms = await fetchNhcStormsBundle()
+      const events = NORMALIZERS['noaa-nhc']({ storms })
+      state.backoff = INITIAL_BACKOFF
+      state.errorCount = 0
+      state.lastError = null
+      state.lastFetch = Date.now()
+      return events
+    } catch (err) {
+      state.errorCount++
+      state.lastError = err.message
+      state.backoff = Math.min(state.backoff * 2, MAX_BACKOFF)
+      self.postMessage({
+        type: 'SOURCE_ERROR',
+        sourceId,
+        error: err.message,
+        nextRetry: state.backoff,
+      })
+      return []
+    }
+  }
+
+  if (sourceId === 'celestrak-tle') {
+    try {
+      const groups = config.tleGroups || ['active']
+      const merged = []
+      const seen = new Set()
+      const groupErrors = []
+      for (const group of groups) {
+        try {
+          const url = `/api/celestrak-tle?group=${encodeURIComponent(group)}`
+          const text = await fetchText(url)
+          const parsed = parseTleCatalog(text)
+          for (const entry of parsed) {
+            const id = entry.noradId
+            if (!id || seen.has(id)) continue
+            seen.add(id)
+            merged.push({ ...entry, _atlasGroup: group })
+          }
+        } catch (err) {
+          groupErrors.push(`${group}: ${err.message || err}`)
+        }
+        await new Promise((r) => setTimeout(r, 600))
+      }
+      if (!merged.length) {
+        throw new Error(groupErrors.join(' · ') || 'All CelesTrak TLE groups failed')
+      }
+      if (groupErrors.length) {
+        state.lastWarning = groupErrors.join(' · ')
+      } else {
+        state.lastWarning = null
+      }
+      const events = NORMALIZERS['celestrak-tle'](merged)
+      state.backoff = INITIAL_BACKOFF
+      state.errorCount = 0
+      state.lastError = null
+      state.lastFetch = Date.now()
+      return events
+    } catch (err) {
+      state.errorCount++
+      state.lastError = err.message
       state.backoff = Math.min(state.backoff * 2, MAX_BACKOFF)
       self.postMessage({
         type: 'SOURCE_ERROR',
@@ -1388,8 +1788,31 @@ async function fetchSource(sourceId) {
       data = merged
     } else if (config.format === 'json') {
       const res = await fetch(config.url, fetchOpts)
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${config.url}`)
+      if (!res.ok) {
+        if (sourceId === 'opensky' && res.status === 429) {
+          state.lastWarning = 'OpenSky rate limited — backing off'
+          throw new Error(`HTTP 429: ${config.url}`)
+        }
+        throw new Error(`HTTP ${res.status}: ${config.url}`)
+      }
       data = await res.json()
+      if (sourceId === 'opensky' && res.headers.get('X-Atlas-Stale')) {
+        state.lastWarning = 'OpenSky rate limited — showing cached positions'
+      }
+      if (sourceId === 'aisstream') {
+        if (data?.warning) state.lastWarning = data.warning
+        else if (data?.error) state.lastWarning = data.error
+        else if (data?.vessels?.length) state.lastWarning = null
+      }
+      if (sourceId === 'bluesky') {
+        if (data?.warning) state.lastWarning = data.warning
+        else if (data?.posts?.length) state.lastWarning = null
+      }
+      if (sourceId === 'fact-check') {
+        if (data?.warning) state.lastWarning = data.warning
+        else if (data?.error) state.lastWarning = data.error
+        else if (data?.claims?.length) state.lastWarning = null
+      }
     } else {
       const res = await fetch(config.url, fetchOpts)
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${config.url}`)
@@ -1397,12 +1820,48 @@ async function fetchSource(sourceId) {
     }
 
     const events = normalizer(data)
+
+    if (sourceId === 'aisstream' && (data?.warning || data?.error)) {
+      self.postMessage({
+        type: 'SOURCE_STATUS',
+        sourceId,
+        status: 'partial',
+        lastFetch: Date.now(),
+        eventCount: events.length,
+        warning: data.warning || data.error,
+      })
+    }
+
+    if (sourceId === 'bluesky' && data?.warning) {
+      self.postMessage({
+        type: 'SOURCE_STATUS',
+        sourceId,
+        status: 'partial',
+        lastFetch: Date.now(),
+        eventCount: events.length,
+        warning: data.warning,
+      })
+    }
+
+    if (sourceId === 'fact-check' && (data?.warning || data?.error)) {
+      self.postMessage({
+        type: 'SOURCE_STATUS',
+        sourceId,
+        status: 'partial',
+        lastFetch: Date.now(),
+        eventCount: events.length,
+        warning: data.warning || data.error,
+      })
+    }
+
     state.backoff = INITIAL_BACKOFF
     state.errorCount = 0
+    state.lastError = null
     state.lastFetch = Date.now()
     return events
   } catch (err) {
     state.errorCount++
+    state.lastError = err.message
     state.backoff = Math.min(state.backoff * 2, MAX_BACKOFF)
     self.postMessage({
       type: 'SOURCE_ERROR',
@@ -1423,6 +1882,14 @@ async function pollSource(sourceId) {
   if (state.active) return
   state.active = true
 
+  self.postMessage({
+    type: 'SOURCE_STATUS',
+    sourceId,
+    status: 'fetching',
+    lastFetch: state.lastFetch || 0,
+    eventCount: 0,
+  })
+
   const events = await fetchSource(sourceId)
 
   // #region agent log
@@ -1433,17 +1900,36 @@ async function pollSource(sourceId) {
     self.postMessage({ type: 'EVENTS', sourceId, events })
   }
 
+  const transientRateLimit =
+    state.lastError?.includes('429') ||
+    state.lastError?.includes('502') ||
+    state.lastError?.includes('503')
+
   self.postMessage({
     type: 'SOURCE_STATUS',
     sourceId,
-    status: state.errorCount === 0 ? 'connected' : 'error',
+    status:
+      state.errorCount === 0
+        ? (state.lastWarning ? 'partial' : 'connected')
+        : transientRateLimit
+          ? 'partial'
+          : 'error',
     lastFetch: state.lastFetch,
     eventCount: events.length,
+    warning: state.lastWarning || (transientRateLimit ? state.lastError : undefined) || undefined,
+    error: state.errorCount > 0 && !transientRateLimit ? state.lastError || 'fetch failed' : undefined,
   })
 
   state.active = false
 
-  const interval = state.errorCount > 0 ? state.backoff : config.pollInterval
+  const interval =
+    sourceId === 'opensky' && state.errorCount > 0
+      ? Math.min(60_000, Math.max(20_000, state.backoff))
+      : sourceId === 'aisstream' && state.errorCount > 0
+        ? Math.min(90_000, state.backoff)
+        : state.errorCount > 0
+          ? state.backoff
+          : config.pollInterval
   state.timer = setTimeout(() => pollSource(sourceId), interval)
 }
 
@@ -1456,12 +1942,20 @@ self.onmessage = function (msg) {
       break
     case 'START_ALL': {
       const allConfigs = getAllConfigs()
-      const sourceIds = payload?.sourceIds || Object.keys(allConfigs)
-      let delay = 0
-      for (const id of sourceIds) {
+      const allIds = payload?.sourceIds || Object.keys(allConfigs)
+      const prioritySet = new Set(PRIORITY_FETCH_SOURCES)
+      const priority = PRIORITY_FETCH_SOURCES.filter((id) => allIds.includes(id))
+      const rest = allIds.filter((id) => !prioritySet.has(id))
+
+      for (const id of priority) {
+        if (allConfigs[id]) pollSource(id)
+      }
+
+      let delay = 1500
+      for (const id of rest) {
         if (!allConfigs[id]) continue
         setTimeout(() => pollSource(id), delay)
-        delay += 500
+        delay += 350
       }
       break
     }

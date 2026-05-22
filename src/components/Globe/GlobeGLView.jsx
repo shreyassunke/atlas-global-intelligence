@@ -14,7 +14,8 @@
  *
  * Day/night cycle reference: https://globe.gl/example/day-night-cycle/
  */
-import { useEffect, useRef, useCallback, startTransition } from 'react'
+import { useEffect, useRef, useCallback, startTransition, useMemo, useState } from 'react'
+import useShareCameraBridge from '../../hooks/useShareCameraBridge'
 import Globe from 'globe.gl'
 import {
     TextureLoader, ShaderMaterial, Vector2, Vector3,
@@ -31,6 +32,11 @@ import { getCategoryColor } from '../../utils/categoryColors'
 import { DIMENSION_COLORS } from '../../core/eventSchema'
 import useGdeltGeoOverlay from '../../hooks/useGdeltGeoOverlay'
 import { toneToChoroplethRgba } from '../../services/gdelt/geoService'
+import { activeGibsImageryKey, gibsTileEngineUrlForKey } from '../../config/gibsBasemap'
+import { buildTerminatorRing } from '../../core/solarTerminator'
+import useGlobeLayerEvents from '../../hooks/useGlobeLayerEvents'
+import { showDetectionLabel as getDetectionLabel } from '../../core/detectionLabels'
+import WindParticleOverlay from './WindParticleOverlay'
 
 // Textures (CDN)
 const EARTH_DAY = 'https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-day.jpg'
@@ -128,6 +134,7 @@ const dayNightShader = {
     uniform sampler2D nightTexture;
     uniform vec2 sunPosition;
     uniform vec2 globeRotation;
+    uniform float nightBoost;
     varying vec3 vNormal;
     varying vec2 vUv;
 
@@ -161,7 +168,7 @@ const dayNightShader = {
       vec3 rotatedSunDirection = rotX * rotY * Polar2Cartesian(sunPosition);
       float intensity = dot(normalize(vNormal), normalize(rotatedSunDirection));
       vec4 dayColor = texture2D(dayTexture, vUv);
-      vec4 nightColor = texture2D(nightTexture, vUv);
+      vec4 nightColor = texture2D(nightTexture, vUv) * (1.0 + nightBoost);
       float blendFactor = smoothstep(-0.1, 0.1, intensity);
       gl_FragColor = mix(nightColor, dayColor, blendFactor);
     }
@@ -205,36 +212,35 @@ function unitVecToLatLng(v) {
 export default function GlobeGLView({ onGlobeReady }) {
     const containerRef = useRef(null)
     const globeRef = useRef(null)
+    const [globeReady, setGlobeReady] = useState(false)
     const onGlobeReadyRef = useRef(onGlobeReady)
     onGlobeReadyRef.current = onGlobeReady
     const idleTimerRef = useRef(null)
     const animFrameRef = useRef(null)
     const lastZoomStoreEmitRef = useRef(0)
 
-    const events = useAtlasStore((s) => s.events)
     const dataLayers = useAtlasStore((s) => s.dataLayers)
-    const setSelectedMarker = useAtlasStore((s) => s.setSelectedMarker)
-    const setHoveredMarker = useAtlasStore((s) => s.setHoveredMarker)
-    const setSelectedEvent = useAtlasStore((s) => s.setSelectedEvent)
-    const setZoomLevel = useAtlasStore((s) => s.setZoomLevel)
+    const tacticalMode = useAtlasStore((s) => s.tacticalMode)
+    const detectionMode = useAtlasStore((s) => s.detectionMode)
+    const detectionLabelDensity = useAtlasStore((s) => s.detectionLabelDensity)
+    const selectedEvent = useAtlasStore((s) => s.selectedEvent)
     const resolvedTier = useAtlasStore((s) => s.resolvedTier)
     const qualityOverrides = useAtlasStore((s) => s.qualityOverrides)
     const isMobile = isMobileDevice()
 
+    const { globePlottedEvents, tacticalAircraft, tacticalVessels, tacticalSatellites, stormOverlays } = useGlobeLayerEvents()
+
+    const setSelectedMarker = useAtlasStore((s) => s.setSelectedMarker)
+    const setHoveredMarker = useAtlasStore((s) => s.setHoveredMarker)
+    const setSelectedEvent = useAtlasStore((s) => s.setSelectedEvent)
+    const setZoomLevel = useAtlasStore((s) => s.setZoomLevel)
+
     const { heatmapPoints, choroplethRows, toneRange } = useGdeltGeoOverlay()
     const heatOn = dataLayers?.gdeltHeatmap !== false
     const choroOn = dataLayers?.gdeltChoropleth === true
-
-    /** Globe only: GDELT + NASA EONET / FIRMS (see `eventSourceToGlobeDataLayerKey`). */
-    const sourceToLayer = useCallback((source) => {
-        const s = (source || '').toLowerCase()
-        if (s.includes('gdelt')) return 'gdelt'
-        if (s.includes('firms')) return 'firms'
-        if (s.includes('eonet')) return 'eonet'
-        return null
-    }, [])
-
-    /** Get event marker color by priority */
+    const gibsImageryKey = activeGibsImageryKey(dataLayers)
+    const terminatorOn = dataLayers?.terminator !== false
+    const windOn = dataLayers?.windOverlay === true
     const getEventColor = useCallback((event) => {
         return DIMENSION_COLORS[event.dimension] || '#1a90ff'
     }, [])
@@ -245,29 +251,73 @@ export default function GlobeGLView({ onGlobeReady }) {
         return base
     }, [])
 
+    useShareCameraBridge({
+        ready: globeReady,
+        apply: (cam) => {
+            const g = globeRef.current
+            if (!g || cam?.lat == null) return
+            const alt = cam.rangeM
+                ? Math.max(0.05, Math.min(4, cam.rangeM / 6_371_000))
+                : 2.5
+            g.pointOfView({ lat: cam.lat, lng: cam.lng, altitude: alt }, 0)
+        },
+        report: () => {
+            const g = globeRef.current
+            if (!g) return null
+            const pov = g.pointOfView()
+            if (!pov || pov.lat == null) return null
+            return {
+                lat: pov.lat,
+                lng: pov.lng,
+                rangeM: (pov.altitude ?? 2.5) * 6_371_000,
+            }
+        },
+    })
+
     const getVisibleItems = useCallback(() => {
-        const newsVisible = []
+        const eventVisible = globePlottedEvents.map((evt) => ({
+            ...evt,
+            lat: evt.lat,
+            lng: evt.lng,
+            category: evt.dimension || 'signals',
+            _isEvent: true,
+            _color: getEventColor(evt),
+            _radius: getEventRadius(evt),
+        }))
 
-        // EventBus events (filtered by data layers and valid coords)
-        const eventVisible = events
-            .filter((evt) => {
-                if (!evt.lat || !evt.lng || (evt.lat === 0 && evt.lng === 0 && evt.latApproximate)) return false
-                const layerKey = sourceToLayer(evt.source)
-                if (!layerKey || dataLayers[layerKey] === false) return false
-                return true
-            })
-            .map((evt) => ({
+        const tacticalVisible = [
+            ...tacticalAircraft.map((evt) => ({
                 ...evt,
-                lat: evt.lat,
-                lng: evt.lng,
-                category: evt.dimension || 'signals',
                 _isEvent: true,
-                _color: getEventColor(evt),
-                _radius: getEventRadius(evt),
-            }))
+                _isTactical: true,
+                _color: evt.isMilitary ? '#ff6b35' : '#00d4ff',
+                _radius: evt.isMilitary ? 0.45 : 0.38,
+            })),
+            ...tacticalVessels.map((evt) => ({
+                ...evt,
+                _isEvent: true,
+                _isTactical: true,
+                _color: '#4dd4ff',
+                _radius: 0.4,
+            })),
+            ...tacticalSatellites.map((evt) => ({
+                ...evt,
+                _isEvent: true,
+                _isTactical: true,
+                _color: evt.isMilitary ? '#ff6b35' : '#c8ff00',
+                _radius: 0.32,
+            })),
+            ...stormOverlays.filter((s) => s.lat != null && s.lng != null).map((evt) => ({
+                ...evt,
+                _isEvent: true,
+                _isTactical: true,
+                _color: '#ff7846',
+                _radius: 0.55,
+            })),
+        ]
 
-        return [...newsVisible, ...eventVisible]
-    }, [events, dataLayers, sourceToLayer, getEventColor, getEventRadius])
+        return [...eventVisible, ...tacticalVisible]
+    }, [globePlottedEvents, tacticalAircraft, tacticalVessels, tacticalSatellites, stormOverlays, getEventColor, getEventRadius])
 
     // ── Initialise globe once ──
     useEffect(() => {
@@ -399,6 +449,7 @@ export default function GlobeGLView({ onGlobeReady }) {
                         nightTexture: { value: nightTex },
                         sunPosition: { value: new Vector2() },
                         globeRotation: { value: new Vector2() },
+                        nightBoost: { value: 0 },
                     },
                     vertexShader: dayNightShader.vertexShader,
                     fragmentShader: dayNightShader.fragmentShader,
@@ -412,6 +463,8 @@ export default function GlobeGLView({ onGlobeReady }) {
 
                     const [sunLng, sunLat] = sunPosAt(Date.now())
                     material.uniforms.sunPosition.value.set(sunLng, sunLat)
+                    material.uniforms.nightBoost.value =
+                        useAtlasStore.getState().dataLayers?.gibsBlackMarble === true ? 0.35 : 0
 
                     // Keep globeRotation uniform in sync with camera
                     const pov = globe.pointOfView()
@@ -566,6 +619,15 @@ export default function GlobeGLView({ onGlobeReady }) {
             .polygonStrokeColor(() => 'rgba(255,255,255,0.22)')
             .polygonsTransitionDuration(600)
 
+        globe
+            .pathsData([])
+            .pathPoints('coords')
+            .pathPointLat((p) => p[1])
+            .pathPointLng((p) => p[0])
+            .pathColor(() => 'rgba(90, 210, 255, 0.82)')
+            .pathStroke(0.12)
+            .pathPointAlt(0.008)
+
         globeRef.current = globe
 
         // ── Register reset-view callback (Header button) ──
@@ -584,16 +646,27 @@ export default function GlobeGLView({ onGlobeReady }) {
         // framing roughly matches Google Earth's behaviour.
         useAtlasStore.getState().setOnFlyToLocation((target) => {
             if (!target) return
-            const { lat, lng, viewport } = target
-            if (!Number.isFinite(lat) || !Number.isFinite(lng)) return
+            const { lat, lng, viewport, bbox } = target
+            const box = bbox || viewport
+            const centerLat = Number.isFinite(lat)
+                ? lat
+                : box
+                    ? (box.south + box.north) / 2
+                    : NaN
+            const centerLng = Number.isFinite(lng)
+                ? lng
+                : box
+                    ? (box.west + box.east) / 2
+                    : NaN
+            if (!Number.isFinite(centerLat) || !Number.isFinite(centerLng)) return
             let altitude = 0.6
-            if (viewport) {
-                const latSpan = Math.abs(viewport.north - viewport.south)
-                const lngSpan = Math.abs(viewport.east - viewport.west)
+            if (box && Number.isFinite(box.north)) {
+                const latSpan = Math.abs(box.north - box.south)
+                const lngSpan = Math.abs(box.east - box.west)
                 const span = Math.max(latSpan, lngSpan)
-                altitude = Math.max(0.08, Math.min(1.6, span / 50))
+                altitude = Math.max(0.06, Math.min(1.4, span / 45))
             }
-            globe.pointOfView({ lat, lng, altitude }, 1400)
+            globe.pointOfView({ lat: centerLat, lng: centerLng, altitude }, 1400)
         })
 
         // Resize
@@ -612,6 +685,7 @@ export default function GlobeGLView({ onGlobeReady }) {
 
         // Signal ready
         const readyTimer = setTimeout(() => {
+            setGlobeReady(true)
             if (onGlobeReadyRef.current) onGlobeReadyRef.current()
             // After globe init, force data sync from current store
             setTimeout(() => {
@@ -652,6 +726,42 @@ export default function GlobeGLView({ onGlobeReady }) {
         }
     }, [resolvedTier, qualityOverrides])
 
+    // NASA GIBS WMTS slippy tiles (free, no key) — one active overlay at a time
+    useEffect(() => {
+        const globe = globeRef.current
+        if (!globe) return
+        if (gibsImageryKey) {
+            globe.globeTileEngineUrl(gibsTileEngineUrlForKey(gibsImageryKey))
+            globe.globeTileEngineClearCache?.()
+        } else {
+            globe.globeTileEngineUrl(null)
+            globe.globeTileEngineClearCache?.()
+        }
+    }, [gibsImageryKey])
+
+    // Solar terminator + NHC storm track paths
+    useEffect(() => {
+        const globe = globeRef.current
+        if (!globe) return
+        const syncPaths = () => {
+            /** @type {{ coords: number[][] }[]} */
+            const paths = []
+            if (terminatorOn) {
+                const ring = buildTerminatorRing(new Date())
+                paths.push({ coords: ring.map((p) => [p.lng, p.lat]) })
+            }
+            for (const s of stormOverlays) {
+                if (s.trackCoords?.length >= 2) {
+                    paths.push({ coords: s.trackCoords.map((p) => [p.lng, p.lat]) })
+                }
+            }
+            globe.pathsData(paths)
+        }
+        syncPaths()
+        const id = setInterval(syncPaths, 60_000)
+        return () => clearInterval(id)
+    }, [terminatorOn, stormOverlays])
+
     // ── Update data ──
     useEffect(() => {
         const globe = globeRef.current
@@ -662,7 +772,33 @@ export default function GlobeGLView({ onGlobeReady }) {
             .sort((a, b) => (b.severity || 0) - (a.severity || 0))
             .slice(0, isMobile ? 15 : 80)
         globe.ringsData(ringItems)
-    }, [events, dataLayers, getVisibleItems, isMobile])
+
+        const detOpts = {
+            detectionMode,
+            detectionLabelDensity,
+            selectedEventId: selectedEvent?.id,
+        }
+        const labelItems = detectionMode
+            ? visible
+                .map((d, idx) => {
+                    const label = getDetectionLabel(d, idx, detOpts)
+                    if (!label) return null
+                    return { lat: d.lat, lng: d.lng, title: label }
+                })
+                .filter(Boolean)
+            : []
+        globe.labelsData(labelItems)
+        globe.labelColor(() => (detectionMode ? 'rgba(136, 255, 170, 0.95)' : 'rgba(255, 255, 255, 0.85)'))
+        if (detectionMode) {
+            globe.ringMaxRadius((d) => (d._isEvent ? 2.8 : RING_MAX_RADIUS))
+        } else {
+            globe.ringMaxRadius((d) => {
+                if (d._isEvent && d.severity >= 4) return 5
+                if (d._isEvent && d.severity >= 3) return 4
+                return RING_MAX_RADIUS
+            })
+        }
+    }, [globePlottedEvents, tacticalAircraft, tacticalVessels, tacticalSatellites, getVisibleItems, isMobile, detectionMode, detectionLabelDensity, selectedEvent?.id])
 
     // ── GDELT heatmap data sync ──
     useEffect(() => {
@@ -679,8 +815,18 @@ export default function GlobeGLView({ onGlobeReady }) {
     useEffect(() => {
         const globe = globeRef.current
         if (!globe) return
+        const stormPolys = stormOverlays
+            .filter((s) => s.coneCoords?.length >= 3)
+            .map((s, i) => ({
+                __id: `storm-cone-${s.stormId || i}`,
+                geometry: {
+                    type: 'Polygon',
+                    coordinates: [s.coneCoords.map((p) => [p.lng, p.lat])],
+                },
+                __capColor: 'rgba(255, 120, 60, 0.18)',
+            }))
         if (!choroOn || choroplethRows.length === 0) {
-            globe.polygonsData([])
+            globe.polygonsData(stormPolys)
             return
         }
         const min = toneRange?.min ?? -5
@@ -693,8 +839,8 @@ export default function GlobeGLView({ onGlobeReady }) {
             tone: r.tone,
             count: r.count,
         }))
-        globe.polygonsData(polys)
-    }, [choroplethRows, toneRange, choroOn])
+        globe.polygonsData([...stormPolys, ...polys])
+    }, [choroplethRows, toneRange, choroOn, stormOverlays])
 
     // ── Zoom sync ──
     useEffect(() => {
@@ -717,10 +863,13 @@ export default function GlobeGLView({ onGlobeReady }) {
     }, [setZoomLevel])
 
     return (
-        <div
-            ref={containerRef}
-            className="fixed inset-0 z-0"
-            style={{ cursor: 'grab', background: '#030712' }}
-        />
+        <div className="fixed inset-0 z-0">
+            <div
+                ref={containerRef}
+                className={`absolute inset-0${tacticalMode ? ' atlas-tactical-mode' : ''}`}
+                style={{ cursor: 'grab', background: '#030712' }}
+            />
+            <WindParticleOverlay enabled={windOn} />
+        </div>
     )
 }

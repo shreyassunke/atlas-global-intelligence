@@ -2,12 +2,14 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import cesium from 'vite-plugin-cesium'
+import atlasApiDevPlugin from './vite-plugin-atlas-api.js'
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), cesium()],
+  plugins: [react(), tailwindcss(), cesium(), atlasApiDevPlugin()],
 
-  // Proxy `/api/*` to a locally running `vercel dev` so the client code path
-  // is identical to production. Start the API with `npm run dev:api`.
+  // Proxy remaining `/api/*` to `vercel dev` when running (`npm run dev:api`).
+  // Tactical-layer proxies (OpenSky, CelesTrak, AISStream) are handled by
+  // vite-plugin-atlas-api.js with retries, caching, and server-only keys.
   server: {
     proxy: {
       '/api': {

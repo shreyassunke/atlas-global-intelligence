@@ -11,8 +11,8 @@ function emptyRule(user) {
   return {
     id: crypto.randomUUID(),
     user_id: user.id,
-    priority: 'any',
-    dimension: 'any',
+    tier: 'any',
+    domain: 'any',
     region: 'global',
     channel: 'email',
     destination: user.email || '',
@@ -80,8 +80,8 @@ export default function AlertRulesPanel({ open, onClose }) {
       const payload = {
         id: rule.id,
         user_id: user.id,
-        priority: rule.priority === 'any' ? null : rule.priority,
-        dimension: rule.dimension === 'any' ? null : rule.dimension,
+        tier: rule.tier === 'any' ? null : rule.tier,
+        domain: rule.domain === 'any' ? null : rule.domain,
         region: rule.region || 'global',
         channel: rule.channel,
         destination: rule.destination,
@@ -135,8 +135,8 @@ export default function AlertRulesPanel({ open, onClose }) {
                     <label className="flex-1 flex flex-col gap-1">
                       <span className="text-[8px] tracking-[0.2em] text-white/30 uppercase">Priority</span>
                       <select
-                        value={rule.priority || 'any'}
-                        onChange={(e) => updateRule(rule.id, 'priority', e.target.value)}
+                        value={rule.tier || 'any'}
+                        onChange={(e) => updateRule(rule.id, 'tier', e.target.value)}
                         className="bg-white/[0.04] border border-white/[0.08] text-[9px] text-white/70
                                    py-1.5 px-2 font-mono outline-none focus:border-[var(--accent)]/30"
                       >
@@ -148,8 +148,8 @@ export default function AlertRulesPanel({ open, onClose }) {
                     <label className="flex-1 flex flex-col gap-1">
                       <span className="text-[8px] tracking-[0.2em] text-white/30 uppercase">Dimension</span>
                       <select
-                        value={rule.dimension || 'any'}
-                        onChange={(e) => updateRule(rule.id, 'dimension', e.target.value)}
+                        value={rule.domain || 'any'}
+                        onChange={(e) => updateRule(rule.id, 'domain', e.target.value)}
                         className="bg-white/[0.04] border border-white/[0.08] text-[9px] text-white/70
                                    py-1.5 px-2 font-mono outline-none focus:border-[var(--accent)]/30"
                       >

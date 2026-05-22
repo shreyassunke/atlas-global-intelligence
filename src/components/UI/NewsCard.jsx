@@ -62,7 +62,10 @@ export default function NewsCard() {
                   className="w-full h-36 object-cover transition-opacity group-hover:opacity-90"
                 />
                 {selectedMarker.isLive && (
-                  <span className="absolute top-2 left-2 flex items-center gap-1 bg-red-600/90 text-white text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded pointer-events-none">
+                  <span
+                    className="absolute top-2 left-2 flex items-center gap-1 bg-red-600/90 text-white text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded pointer-events-none"
+                    title="Live YouTube broadcast"
+                  >
                     <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
                     LIVE
                   </span>
@@ -90,6 +93,14 @@ export default function NewsCard() {
               {selectedMarker.mediaType === 'video' && !selectedMarker.thumbnailUrl && (
                 <span className="text-[10px] font-bold uppercase tracking-wider text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded px-1.5 py-0.5 leading-none">
                   {selectedMarker.isLive ? 'LIVE' : 'VIDEO'}
+                </span>
+              )}
+              {(selectedMarker.corroborationCount >= 2 || (selectedMarker.corroborationScore ?? 0) >= 0.25) && (
+                <span
+                  className="text-[10px] font-bold uppercase tracking-wider text-emerald-300/90 bg-emerald-500/10 border border-emerald-500/25 rounded px-1.5 py-0.5 leading-none"
+                  title={`${selectedMarker.corroborationCount} independent feed(s) · score ${Math.round((selectedMarker.corroborationScore ?? 0) * 100)}%`}
+                >
+                  ✓ {selectedMarker.corroborationCount} src
                 </span>
               )}
             </div>
@@ -131,13 +142,24 @@ export default function NewsCard() {
 
             {/* Coordinates */}
             {selectedMarker.lat != null && selectedMarker.lng != null && (
-              <div className="text-[11px] text-slate-500 font-mono flex items-center gap-2">
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <div className="text-[11px] text-slate-500 font-mono flex items-center gap-2 flex-wrap">
+                <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
                 </svg>
-                {Math.abs(selectedMarker.lat).toFixed(3)}° {selectedMarker.lat >= 0 ? 'N' : 'S'},{' '}
-                {Math.abs(selectedMarker.lng).toFixed(3)}° {selectedMarker.lng >= 0 ? 'E' : 'W'}
+                <span>
+                  {selectedMarker.latApproximate ? '≈ ' : ''}
+                  {Math.abs(selectedMarker.lat).toFixed(3)}° {selectedMarker.lat >= 0 ? 'N' : 'S'},{' '}
+                  {Math.abs(selectedMarker.lng).toFixed(3)}° {selectedMarker.lng >= 0 ? 'E' : 'W'}
+                </span>
+                {selectedMarker.latApproximate && (
+                  <span
+                    className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-300/90"
+                    title="Coordinates are a country or region centroid, not a precise geocode"
+                  >
+                    ~ centroid
+                  </span>
+                )}
               </div>
             )}
 

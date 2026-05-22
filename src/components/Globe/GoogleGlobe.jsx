@@ -6,6 +6,7 @@ import React, {
   useEffect,
   useMemo,
   useRef,
+  useState,
 } from 'react'
 import {
   APIProvider,
@@ -25,14 +26,24 @@ import { DIMENSION_COLORS } from '../../core/eventSchema'
 import { generateSprite, getAnimationState, getSeveritySize } from '../../core/visualGrammar'
 import {
   NUCLEAR_FACILITIES,
-  SUBMARINE_CABLE_PATHS,
   clusterEvents,
-  eventSourceToGlobeDataLayerKey,
+  detectClusterToneDisagreement,
 } from '../../core/globeLayers'
+import {
+  bucketCameraRangeM,
+  computeOrbitArc,
+  orbitArcRenderParams,
+  satelliteDisplayAltitudeM,
+} from '../../core/satellitePropagation'
+import { showDetectionLabel as getDetectionLabel } from '../../core/detectionLabels'
+import { aircraftSpriteDataUrl, satelliteSpriteDataUrl, vesselSpriteDataUrl } from '../../core/tacticalSprites'
+import useGlobeLayerEvents from '../../hooks/useGlobeLayerEvents'
 import { buildGdeltDocQuery } from '../../services/gdelt/analyticsService'
 import useGdeltGeoOverlay from '../../hooks/useGdeltGeoOverlay'
+import useShareCameraBridge from '../../hooks/useShareCameraBridge'
 import { toneToChoroplethRgba } from '../../services/gdelt/geoService'
 import { PLACE_SEARCH_PIN_SRC } from '../../constants/placeSearchPin'
+import { buildTerminatorRing } from '../../core/solarTerminator'
 
 const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ''
 
@@ -50,20 +61,6 @@ const STARTUP_ORBIT_TILT = 0
 const FLY_TO_NADIR_TILT = 0
 
 /**
- * Max event age (ms) to plot on the globe for each HUD `timeFilter` tier.
- * Without this, events linger until their TTL expires (up to 24h for some
- * sources) and the globe ends up littered with stale single-dot markers.
- * `live` intentionally matches the "pulsing" recency window (2h) so the
- * globe reflects what the user reads as *live*, not a rolling 24h window.
- */
-const TIME_FILTER_MAX_AGE_MS = {
-  live: 2 * 3600_000,
-  '24h': 24 * 3600_000,
-  '7d': 7 * 24 * 3600_000,
-  '30d': 30 * 24 * 3600_000,
-}
-
-/**
  * Hard cap on the number of individual `<Marker3D>` elements we mount at
  * once. With the GDELT firehose unleashed we can have 5-10k geocoded events
  * in-memory; Map3D handles overlap via `OPTIONAL_AND_HIDES_LOWER_PRIORITY`
@@ -72,13 +69,6 @@ const TIME_FILTER_MAX_AGE_MS = {
  * there's news, cheap enough to keep the 60fps camera path responsive.
  * When the pool exceeds the cap we keep the highest-severity, most-recent
  * events (see `rankForGlobeRender`).
- */
-const MAX_GLOBE_MARKERS = 2500
-
-/**
- * O(n²) convex-hull clustering is fine up to ~2k events; beyond that we
- * down-sample the list we feed the clusterer so the main thread doesn't
- * stutter while the camera moves.
  */
 const MAX_CLUSTER_INPUTS = 2000
 
@@ -364,6 +354,8 @@ function InnerMap({ onGlobeReady }) {
     tilt: STARTUP_ORBIT_TILT,
     roll: 0,
   })
+  const [cameraRangeM, setCameraRangeM] = useState(() => bucketCameraRangeM(STARTUP_ORBIT_RANGE_M))
+  const cameraRangeBucketRef = useRef(bucketCameraRangeM(STARTUP_ORBIT_RANGE_M))
 
   const lastPointerRef = useRef({
     x: typeof window !== 'undefined' ? window.innerWidth / 2 : 0,
@@ -376,11 +368,14 @@ function InnerMap({ onGlobeReady }) {
 
   const searchHighlight = useAtlasStore((s) => s.searchHighlight)
   const readyRef = useRef(false)
+  const [globeMapReady, setGlobeMapReady] = useState(false)
   const introStartedRef = useRef(false)
   const lastZoomEmitRef = useRef(0)
   const idleTimerRef = useRef(null)
   const effectiveAutoRotateRef = useRef(false)
   const idleSpinGateRef = useRef(false)
+  const userGesturingRef = useRef(false)
+  const activePointersRef = useRef(0)
   const spinRafRef = useRef(null)
   const spriteCacheRef = useRef(new Map())
 
@@ -390,64 +385,50 @@ function InnerMap({ onGlobeReady }) {
   const setHoveredMarker = useAtlasStore((s) => s.setHoveredMarker)
   const openStreetView = useAtlasStore((s) => s.openStreetView)
 
-  const events = useAtlasStore((s) => s.events)
   const dataLayers = useAtlasStore((s) => s.dataLayers)
-  const activeDimensions = useAtlasStore((s) => s.activeDimensions)
-  const priorityFilter = useAtlasStore((s) => s.priorityFilter)
-  const timeFilter = useAtlasStore((s) => s.timeFilter)
+  const terminatorOn = dataLayers?.terminator !== false
+  const [terminatorRing, setTerminatorRing] = useState(() =>
+    buildTerminatorRing().map((p) => ({ ...p, altitude: 12000 })),
+  )
+  const selectedEvent = useAtlasStore((s) => s.selectedEvent)
+  const detectionMode = useAtlasStore((s) => s.detectionMode)
+  const detectionLabelDensity = useAtlasStore((s) => s.detectionLabelDensity)
+  const tacticalMode = useAtlasStore((s) => s.tacticalMode)
   const resolvedTier = useAtlasStore((s) => s.resolvedTier)
   const qualityOverrides = useAtlasStore((s) => s.qualityOverrides)
 
-  const globePlottedEvents = useMemo(() => {
-    const list = []
-    const maxAgeMs = TIME_FILTER_MAX_AGE_MS[timeFilter] ?? TIME_FILTER_MAX_AGE_MS.live
-    const now = Date.now()
-    for (const evt of events) {
-      if (evt.lat == null || evt.lng == null) continue
-      const layerKey = eventSourceToGlobeDataLayerKey(evt.source)
-      if (!layerKey) continue
-      if (dataLayers[layerKey] === false) continue
-      if (!activeDimensions.has(evt.dimension)) continue
-      if (priorityFilter === 'p1' && evt.priority !== 'p1') continue
-      if (priorityFilter === 'p1p2' && evt.priority === 'p3') continue
-      // Drop markers older than the HUD time window so the globe reflects the
-      // selected tier (Live / 24h / 7d / 30d) instead of the raw TTL buffer.
-      // Use max(timestamp, fetchedAt) so low-precision upstream stamps (e.g.
-      // CAMEO noon-UTC) cannot cull fresh ingests; TTL still governs true staleness.
-      const tsMs = evt.timestamp ? new Date(evt.timestamp).getTime() : NaN
-      const fMs = evt.fetchedAt ? new Date(evt.fetchedAt).getTime() : NaN
-      const refMs = Math.max(
-        Number.isFinite(tsMs) ? tsMs : -Infinity,
-        Number.isFinite(fMs) ? fMs : -Infinity,
-      )
-      if (Number.isFinite(refMs) && refMs > -Infinity && now - refMs > maxAgeMs) continue
-      list.push(evt)
-    }
+  const {
+    globePlottedEvents,
+    tacticalAircraft,
+    tacticalVessels,
+    tacticalSatellites,
+    stormOverlays,
+    propagationTick,
+  } = useGlobeLayerEvents()
 
-    if (list.length <= MAX_GLOBE_MARKERS) return list
+  const selectedOrbitTrack = useMemo(() => {
+    if (selectedEvent?.trackKind !== 'satellite' || !selectedEvent?.tleLine1 || !selectedEvent?.tleLine2) return null
+    return computeOrbitArc(selectedEvent.tleLine1, selectedEvent.tleLine2, new Date(), 72, cameraRangeM)
+  }, [selectedEvent, cameraRangeM])
 
-    // Rank so the visible subset favours breaking + fresh signals over
-    // dense old-news clutter. Score combines priority tier, severity, and
-    // recency — all normalised so none dominates on its own.
-    const priorityRank = { p1: 3, p2: 2, p3: 1 }
-    const scored = list.map((evt) => {
-      const tsRaw = evt.timestamp ? new Date(evt.timestamp).getTime() : NaN
-      const fAt = evt.fetchedAt ? new Date(evt.fetchedAt).getTime() : NaN
-      const ts = Math.max(
-        Number.isFinite(tsRaw) ? tsRaw : -Infinity,
-        Number.isFinite(fAt) ? fAt : -Infinity,
-      )
-      const tsForRank = Number.isFinite(ts) && ts > -Infinity ? ts : now
-      const ageMin = Math.max(0, (now - tsForRank) / 60_000)
-      // Exponential decay ~1h half-life.
-      const recency = Math.exp(-ageMin / 60)
-      const sev = (evt.severity || 1) / 5
-      const pri = priorityRank[evt.priority] || 1
-      return { evt, score: recency * 2 + sev * 1.5 + pri }
-    })
-    scored.sort((a, b) => b.score - a.score)
-    return scored.slice(0, MAX_GLOBE_MARKERS).map((s) => s.evt)
-  }, [events, dataLayers, activeDimensions, priorityFilter, timeFilter])
+  const satelliteOrbitArcs = useMemo(() => {
+    if (tacticalSatellites.length === 0) return []
+    const { maxArcs, steps } = orbitArcRenderParams(cameraRangeM)
+    const orbitTick = cameraRangeM >= 16_000_000 ? Math.floor(propagationTick / 4) : propagationTick
+    return tacticalSatellites.slice(0, maxArcs).map((sat) => ({
+      key: `orb-${sat.id}-${orbitTick}`,
+      coords: computeOrbitArc(sat.tleLine1, sat.tleLine2, new Date(), steps, cameraRangeM),
+      military: sat.isMilitary,
+    })).filter((a) => a.coords.length >= 2)
+  }, [tacticalSatellites, cameraRangeM, propagationTick])
+
+  const farGlobeView = cameraRangeM >= 12_000_000
+
+  const showDetectionLabel = useCallback((evt, idx) => getDetectionLabel(evt, idx, {
+    detectionMode,
+    detectionLabelDensity,
+    selectedEventId: selectedEvent?.id,
+  }), [detectionMode, detectionLabelDensity, selectedEvent?.id])
 
   const clusterLayers = useMemo(() => {
     // Cap the clusterer input so the O(n²) pass stays bounded when the
@@ -460,6 +441,7 @@ function InnerMap({ onGlobeReady }) {
     const clusters = clusterEvents(clusterInput, 200, 5)
     return clusters.map((cluster) => {
       const dimensionColor = DIMENSION_COLORS[cluster.dimension] || '#1a90ff'
+      const toneConflict = detectClusterToneDisagreement(cluster)
       const points = cluster.events.map((e) => [e.lng, e.lat])
       const hull = convexHull(points)
       if (hull.length < 3) return null
@@ -467,11 +449,12 @@ function InnerMap({ onGlobeReady }) {
       return {
         key: `cl-${cluster.dimension}-${cluster.centroid.lat}-${cluster.centroid.lng}`,
         ring,
-        fill: rgbaFromHex(dimensionColor, 0.12),
-        stroke: rgbaFromHex(dimensionColor, 0.55),
+        fill: rgbaFromHex(dimensionColor, toneConflict ? 0.16 : 0.12),
+        stroke: rgbaFromHex(toneConflict ? '#ffaa00' : dimensionColor, toneConflict ? 0.85 : 0.55),
         count: cluster.count,
         centroid: cluster.centroid,
-        strokeColorHex: dimensionColor,
+        strokeColorHex: toneConflict ? '#ffaa00' : dimensionColor,
+        toneConflict,
       }
     }).filter(Boolean)
   }, [globePlottedEvents])
@@ -498,7 +481,6 @@ function InnerMap({ onGlobeReady }) {
     (ev) => {
       const d = ev.detail
       if (d.center) cameraRef.current.center = d.center
-      if (typeof d.range === 'number') cameraRef.current.range = d.range
       if (typeof d.heading === 'number') cameraRef.current.heading = d.heading
       if (typeof d.tilt === 'number') cameraRef.current.tilt = d.tilt
       if (typeof d.roll === 'number') cameraRef.current.roll = d.roll
@@ -506,6 +488,12 @@ function InnerMap({ onGlobeReady }) {
       const now = performance.now()
       if (typeof d.range === 'number') {
         const clamped = Math.max(RANGE_MIN_M, Math.min(RANGE_MAX_M, d.range))
+        cameraRef.current.range = clamped
+        const bucket = bucketCameraRangeM(clamped)
+        if (bucket !== cameraRangeBucketRef.current) {
+          cameraRangeBucketRef.current = bucket
+          setCameraRangeM(bucket)
+        }
         const zoom = (clamped - RANGE_MIN_M) / (RANGE_MAX_M - RANGE_MIN_M)
         if (now - lastZoomEmitRef.current >= ZOOM_STORE_MIN_INTERVAL_MS) {
           lastZoomEmitRef.current = now
@@ -513,7 +501,7 @@ function InnerMap({ onGlobeReady }) {
         }
       }
 
-      resetIdleTimer()
+      if (!userGesturingRef.current) resetIdleTimer()
     },
     [resetIdleTimer, setZoomLevel],
   )
@@ -597,6 +585,7 @@ function InnerMap({ onGlobeReady }) {
       if (
         effectiveAutoRotateRef.current &&
         idleSpinGateRef.current &&
+        !userGesturingRef.current &&
         map3dRef.current?.map3d
       ) {
         const el = map3dRef.current.map3d
@@ -692,21 +681,29 @@ function InnerMap({ onGlobeReady }) {
     useAtlasStore.getState().setOnFlyToLocation((target) => {
       const map = map3dRef.current
       if (!map?.flyCameraTo || !target) return
-      const { lat, lng, viewport } = target
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return
+      const { lat, lng, viewport, bbox } = target
+      const box = bbox || viewport
+      const centerLat = Number.isFinite(lat)
+        ? lat
+        : box
+          ? (box.south + box.north) / 2
+          : NaN
+      const centerLng = Number.isFinite(lng)
+        ? lng
+        : box
+          ? (box.west + box.east) / 2
+          : NaN
+      if (!Number.isFinite(centerLat) || !Number.isFinite(centerLng)) return
 
       let range
-      if (viewport) {
-        const latSpanDeg = Math.abs(viewport.north - viewport.south)
-        const lngSpanDeg = Math.abs(viewport.east - viewport.west)
-        const cosLat = Math.max(0.15, Math.abs(Math.cos((lat * Math.PI) / 180)))
-        // Convert the larger of the two spans to meters, then pad so the
-        // bbox sits well inside the viewport at nadir (tilt 0 shows more
-        // ground than an oblique tilt for the same range — slightly tighter mult).
+      if (box && Number.isFinite(box.north) && Number.isFinite(box.south)) {
+        const latSpanDeg = Math.abs(box.north - box.south)
+        const lngSpanDeg = Math.abs(box.east - box.west)
+        const cosLat = Math.max(0.15, Math.abs(Math.cos((centerLat * Math.PI) / 180)))
         const latSpanM = latSpanDeg * 111_000
         const lngSpanM = lngSpanDeg * 111_000 * cosLat
         const maxSpanM = Math.max(latSpanM, lngSpanM)
-        range = Math.max(1500, Math.min(RANGE_MAX_M * 0.5, maxSpanM * 2.0))
+        range = Math.max(800, Math.min(RANGE_MAX_M * 0.45, maxSpanM * 1.85))
       } else {
         range = 22_000
       }
@@ -714,7 +711,7 @@ function InnerMap({ onGlobeReady }) {
       idleSpinGateRef.current = false
       map.flyCameraTo({
         endCamera: {
-          center: { lat, lng, altitude: 0 },
+          center: { lat: centerLat, lng: centerLng, altitude: 0 },
           range,
           heading: 0,
           tilt: FLY_TO_NADIR_TILT,
@@ -780,14 +777,53 @@ function InnerMap({ onGlobeReady }) {
     })
   }, [defaultCenter])
 
+  const applyShareCamera = useCallback((cam) => {
+    const map = map3dRef.current
+    if (!map?.flyCameraTo || !cam) return
+    map.flyCameraTo({
+      endCamera: {
+        center: { lat: cam.lat, lng: cam.lng, altitude: 0 },
+        range: cam.rangeM ?? cameraRef.current.range ?? STARTUP_ORBIT_RANGE_M,
+        heading: cam.heading ?? 0,
+        tilt: cam.tilt ?? FLY_TO_NADIR_TILT,
+        roll: 0,
+      },
+      durationMillis: 0,
+    })
+  }, [])
+
+  useShareCameraBridge({
+    ready: globeMapReady,
+    apply: applyShareCamera,
+    report: () => {
+      const c = cameraRef.current
+      if (!c?.center || c.center.lat == null) return null
+      return {
+        lat: c.center.lat,
+        lng: c.center.lng,
+        rangeM: c.range,
+        heading: c.heading,
+        tilt: c.tilt,
+      }
+    },
+  })
+
   const finalizeReady = useCallback(() => {
     if (readyRef.current) return
     readyRef.current = true
-    if (map3dRef.current?.flyCameraTo) runIntro()
+    setGlobeMapReady(true)
+    const urlCam = useAtlasStore.getState().shareCamera
+    if (map3dRef.current?.flyCameraTo) {
+      if (urlCam?.lat != null && urlCam?.lng != null) {
+        applyShareCamera(urlCam)
+      } else {
+        runIntro()
+      }
+    }
     const cb = onGlobeReadyRef.current
     if (typeof cb === 'function') cb()
     requestSnapshot()
-  }, [runIntro])
+  }, [runIntro, applyShareCamera])
 
   const onSteadyChange = useCallback(
     (ev) => {
@@ -802,6 +838,16 @@ function InnerMap({ onGlobeReady }) {
     return () => clearTimeout(t)
   }, [finalizeReady])
 
+  useEffect(() => {
+    if (!terminatorOn) return undefined
+    const tick = () => {
+      setTerminatorRing(buildTerminatorRing().map((p) => ({ ...p, altitude: 12000 })))
+    }
+    tick()
+    const id = setInterval(tick, 60_000)
+    return () => clearInterval(id)
+  }, [terminatorOn])
+
   /**
    * Convert the stored Nominatim boundary GeoJSON into an array of
    * Map3D-ready rings (`Array<{lat,lng,altitude}>`). Matches Google
@@ -811,6 +857,17 @@ function InnerMap({ onGlobeReady }) {
    */
   const searchHighlightRings = useMemo(() => {
     const boundary = searchHighlight?.boundary
+    const vp = searchHighlight?.viewport
+    if (!boundary && vp && Number.isFinite(vp.north) && Number.isFinite(vp.south)) {
+      const ring = [
+        { lat: vp.north, lng: vp.west, altitude: 40 },
+        { lat: vp.north, lng: vp.east, altitude: 40 },
+        { lat: vp.south, lng: vp.east, altitude: 40 },
+        { lat: vp.south, lng: vp.west, altitude: 40 },
+        { lat: vp.north, lng: vp.west, altitude: 40 },
+      ]
+      return { rings: [ring] }
+    }
     if (!boundary || !Array.isArray(boundary.coordinates)) return null
 
     const rings = []
@@ -867,13 +924,41 @@ function InnerMap({ onGlobeReady }) {
       ref={globeWrapRef}
       tabIndex={-1}
       aria-label="3D globe"
-      className="fixed inset-0 z-0 outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/30 focus-visible:ring-offset-2 focus-visible:ring-offset-black/40"
-      style={{ cursor: 'grab' }}
+      className={`fixed inset-0 z-0 outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/30 focus-visible:ring-offset-2 focus-visible:ring-offset-black/40${tacticalMode ? ' atlas-tactical-mode' : ''}`}
+      style={{ cursor: 'grab', touchAction: 'none' }}
       onPointerDown={(e) => {
-        resetIdleTimer()
+        activePointersRef.current += 1
+        userGesturingRef.current = true
+        idleSpinGateRef.current = false
+        clearTimeout(idleTimerRef.current)
+        e.currentTarget.style.cursor = 'grabbing'
         if (e.button === 0) e.currentTarget.focus({ preventScroll: true })
       }}
-      onWheel={resetIdleTimer}
+      onPointerUp={(e) => {
+        activePointersRef.current = Math.max(0, activePointersRef.current - 1)
+        if (activePointersRef.current === 0) {
+          userGesturingRef.current = false
+          e.currentTarget.style.cursor = 'grab'
+          resetIdleTimer()
+        }
+      }}
+      onPointerCancel={(e) => {
+        activePointersRef.current = Math.max(0, activePointersRef.current - 1)
+        if (activePointersRef.current === 0) {
+          userGesturingRef.current = false
+          e.currentTarget.style.cursor = 'grab'
+          resetIdleTimer()
+        }
+      }}
+      onWheel={() => {
+        userGesturingRef.current = true
+        idleSpinGateRef.current = false
+        clearTimeout(idleTimerRef.current)
+        idleTimerRef.current = setTimeout(() => {
+          userGesturingRef.current = false
+          resetIdleTimer()
+        }, 400)
+      }}
       onPointerMove={(e) => {
         lastPointerRef.current = { x: e.clientX, y: e.clientY }
       }}
@@ -898,22 +983,6 @@ function InnerMap({ onGlobeReady }) {
         onClick={handleMapClick}
         onSteadyChange={onSteadyChange}
       >
-        {vectorLayersReady &&
-          SUBMARINE_CABLE_PATHS.map((cable) => (
-            <Polyline3D
-              key={cable.name}
-              coordinates={cable.points.map(([lng, lat]) => ({
-                lat,
-                lng,
-                altitude: 5000,
-              }))}
-              strokeColor="rgba(0, 207, 255, 0.14)"
-              strokeWidth={1}
-              outerColor="rgba(0, 207, 255, 0.06)"
-              outerWidth={1}
-            />
-          ))}
-
         {vectorLayersReady &&
           clusterLayers.map((cl) => (
             <Polygon3D
@@ -987,6 +1056,17 @@ function InnerMap({ onGlobeReady }) {
           />
         ))}
 
+        {vectorLayersReady && terminatorOn && terminatorRing.length >= 2 && (
+          <Polyline3D
+            key="solar-terminator"
+            coordinates={terminatorRing}
+            strokeColor="rgba(100, 220, 255, 0.72)"
+            strokeWidth={2}
+            outerColor="rgba(100, 220, 255, 0.12)"
+            outerWidth={0.8}
+          />
+        )}
+
         {vectorLayersReady &&
           searchHighlightRings?.rings.map((ring, idx) => (
             <Polyline3D
@@ -1045,15 +1125,18 @@ function InnerMap({ onGlobeReady }) {
           const anim = getAnimationState(evt.timestamp)
           const pulseClass =
             anim !== 'static' && idx < 20 ? 'atlas-globe-event-pulse' : ''
+          const detLabel = showDetectionLabel(evt, idx)
           return (
             <Marker3D
               key={evt.id}
-              position={{ lat: evt.lat, lng: evt.lng, altitude: 800 }}
+              position={{ lat: evt.lat, lng: evt.lng, altitude: 1400 }}
               altitudeMode={AltitudeMode.RELATIVE_TO_GROUND}
               drawsWhenOccluded
               sizePreserved
-              collisionBehavior={CollisionBehavior.OPTIONAL_AND_HIDES_LOWER_PRIORITY}
+              collisionBehavior={CollisionBehavior.REQUIRED_AND_HIDES_OPTIONAL}
               title={evt.title}
+              label={detLabel}
+              zIndex={5}
               onClick={(e) => onEventClick(e, evt)}
             >
               <img
@@ -1064,6 +1147,160 @@ function InnerMap({ onGlobeReady }) {
                 className={pulseClass}
                 style={{ opacity: evt.opacity ?? 1 }}
                 onMouseEnter={() => setPointerHover(evt, true)}
+                onMouseLeave={() => setHoveredMarker(null)}
+              />
+            </Marker3D>
+          )
+        })}
+
+        {selectedOrbitTrack && selectedOrbitTrack.length >= 2 && (
+          <Polyline3D
+            key="sat-orbit-track-selected"
+            coordinates={selectedOrbitTrack}
+            strokeColor="rgba(200, 255, 0, 0.95)"
+            strokeWidth={2.5}
+            outerColor="rgba(200, 255, 0, 0.2)"
+            outerWidth={1}
+          />
+        )}
+
+        {satelliteOrbitArcs.map((arc) => (
+          <Polyline3D
+            key={arc.key}
+            coordinates={arc.coords}
+            strokeColor={arc.military ? 'rgba(255, 107, 53, 0.55)' : 'rgba(200, 255, 0, 0.35)'}
+            strokeWidth={1.2}
+            outerColor={arc.military ? 'rgba(255, 107, 53, 0.08)' : 'rgba(200, 255, 0, 0.06)'}
+            outerWidth={0.6}
+          />
+        ))}
+
+        {tacticalAircraft.map((ac, idx) => {
+          const size = ac.isMilitary ? 26 : 22
+          const sprite = aircraftSpriteDataUrl(ac.trackDeg || 0, ac.isMilitary, size)
+          const altM = ac.altitudeM != null ? Math.max(500, ac.altitudeM) : 8000
+          const detLabel = showDetectionLabel(ac, idx)
+          return (
+            <Marker3D
+              key={ac.id}
+              position={{ lat: ac.lat, lng: ac.lng, altitude: altM }}
+              altitudeMode={AltitudeMode.RELATIVE_TO_GROUND}
+              drawsWhenOccluded
+              sizePreserved
+              collisionBehavior={CollisionBehavior.REQUIRED}
+              label={detLabel || (ac.isMilitary ? ac.callsign?.trim()?.slice(0, 8) : undefined)}
+              title={`${ac.title}${ac.altitudeM != null ? ` · ${Math.round(ac.altitudeM * 3.281)} ft` : ''}`}
+              zIndex={20}
+              onClick={(e) => onEventClick(e, ac)}
+            >
+              <img
+                src={sprite}
+                width={size}
+                height={size}
+                alt=""
+                draggable={false}
+                onMouseEnter={() => setPointerHover(ac, true)}
+                onMouseLeave={() => setHoveredMarker(null)}
+              />
+            </Marker3D>
+          )
+        })}
+
+        {tacticalVessels.map((v, idx) => {
+          const size = 24
+          const sprite = vesselSpriteDataUrl(v.cog || 0, size)
+          const detLabel = showDetectionLabel(v, idx)
+          return (
+            <Marker3D
+              key={v.id}
+              position={{ lat: v.lat, lng: v.lng, altitude: 0 }}
+              altitudeMode={AltitudeMode.CLAMP_TO_GROUND}
+              drawsWhenOccluded
+              sizePreserved
+              collisionBehavior={CollisionBehavior.REQUIRED}
+              label={detLabel || (v.shipName ? v.shipName.slice(0, 10) : undefined)}
+              title={`${v.title}${v.sog != null ? ` · ${v.sog.toFixed(1)} kn` : ''}`}
+              zIndex={18}
+              onClick={(e) => onEventClick(e, v)}
+            >
+              <img
+                src={sprite}
+                width={size}
+                height={size}
+                alt=""
+                draggable={false}
+                onMouseEnter={() => setPointerHover(v, true)}
+                onMouseLeave={() => setHoveredMarker(null)}
+              />
+            </Marker3D>
+          )
+        })}
+
+        {stormOverlays.map((storm) => {
+          const trackCoords = (storm.trackCoords || []).map((p) => ({ lat: p.lat, lng: p.lng, altitude: 5000 }))
+          const coneRing = (storm.coneCoords || []).map((p) => ({ lat: p.lat, lng: p.lng, altitude: 3000 }))
+          return (
+            <React.Fragment key={storm.id}>
+              {coneRing.length >= 3 && (
+                <Polygon3D
+                  outerCoordinates={[coneRing]}
+                  fillColor="rgba(255, 120, 60, 0.12)"
+                  strokeColor="rgba(255, 120, 60, 0.45)"
+                  strokeWidth={1.5}
+                />
+              )}
+              {trackCoords.length >= 2 && (
+                <Polyline3D
+                  coordinates={trackCoords}
+                  strokeColor="rgba(255, 180, 80, 0.9)"
+                  strokeWidth={2.5}
+                  outerColor="rgba(255, 120, 60, 0.15)"
+                  outerWidth={1}
+                />
+              )}
+              {storm.lat != null && storm.lng != null && (
+                <Marker3D
+                  position={{ lat: storm.lat, lng: storm.lng, altitude: 8000 }}
+                  altitudeMode={AltitudeMode.RELATIVE_TO_GROUND}
+                  drawsWhenOccluded
+                  sizePreserved
+                  label={storm.stormCategory || 'TC'}
+                  title={storm.title}
+                  zIndex={30}
+                  onClick={(e) => onEventClick(e, storm)}
+                >
+                  <img src={getSprite(storm.priority || 'p1', 'environment')} width={28} height={28} alt="" />
+                </Marker3D>
+              )}
+            </React.Fragment>
+          )
+        })}
+
+        {(farGlobeView ? tacticalSatellites.slice(0, 120) : tacticalSatellites).map((sat, idx) => {
+          const size = 18
+          const sprite = satelliteSpriteDataUrl(sat.isMilitary, size)
+          const altM = satelliteDisplayAltitudeM(sat.altitudeM, cameraRangeM)
+          const detLabel = showDetectionLabel(sat, idx)
+          return (
+            <Marker3D
+              key={sat.id}
+              position={{ lat: sat.lat, lng: sat.lng, altitude: altM }}
+              altitudeMode={AltitudeMode.ABSOLUTE}
+              drawsWhenOccluded
+              sizePreserved
+              collisionBehavior={farGlobeView ? CollisionBehavior.OPTIONAL_AND_HIDES_LOWER_PRIORITY : CollisionBehavior.REQUIRED}
+              label={detLabel || (sat.satelliteGroup === 'stations' ? sat.title?.slice(0, 12) : undefined)}
+              title={`${sat.title}${sat.satellitePurposeLabel ? ` · ${sat.satellitePurposeLabel}` : ''}${sat.altitudeM != null ? ` · ${Math.round(sat.altitudeM / 1000)} km alt` : ''}`}
+              zIndex={farGlobeView ? 5 : 25}
+              onClick={farGlobeView ? undefined : (e) => onEventClick(e, sat)}
+            >
+              <img
+                src={sprite}
+                width={size}
+                height={size}
+                alt=""
+                draggable={false}
+                onMouseEnter={() => setPointerHover(sat, true)}
                 onMouseLeave={() => setHoveredMarker(null)}
               />
             </Marker3D>

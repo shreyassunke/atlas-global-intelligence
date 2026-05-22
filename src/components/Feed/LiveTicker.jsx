@@ -300,7 +300,10 @@ export default function LiveTicker() {
                       <div className="relative w-full h-24 overflow-hidden rounded-t" style={{ margin: '-12px -14px 8px -14px', width: 'calc(100% + 28px)' }}>
                         <img src={item.thumbnailUrl} alt="" loading="lazy" className="w-full h-full object-cover" />
                         {item.isLive && (
-                          <span className="absolute top-1.5 left-1.5 flex items-center gap-0.5 bg-red-600/90 text-white text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded">
+                          <span
+                            className="absolute top-1.5 left-1.5 flex items-center gap-0.5 bg-red-600/90 text-white text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
+                            title="Live YouTube broadcast"
+                          >
                             <span className="w-1 h-1 rounded-full bg-white animate-pulse" />
                             LIVE
                           </span>

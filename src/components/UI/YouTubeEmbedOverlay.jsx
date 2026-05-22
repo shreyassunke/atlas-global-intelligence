@@ -90,7 +90,10 @@ export default function YouTubeEmbedOverlay() {
             <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-white/10 bg-black/60 flex-shrink-0">
               <div className="flex items-center gap-2.5 min-w-0 flex-1">
                 {youtubeEmbed?.isLive && (
-                  <span className="flex items-center gap-1 rounded bg-red-600/90 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white flex-shrink-0">
+                  <span
+                    className="flex items-center gap-1 rounded bg-red-600/90 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white flex-shrink-0"
+                    title="Live YouTube broadcast"
+                  >
                     <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" />
                     Live
                   </span>

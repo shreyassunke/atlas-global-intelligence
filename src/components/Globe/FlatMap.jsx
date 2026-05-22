@@ -1,20 +1,33 @@
 /**
- * FlatMap — 2D map via MapLibre GL JS. Countries use offline χ coloring;
- * US states run a live Welsh–Powell greedy demo when zoomed over CONUS (see `usStatesGreedyColoringPresentation.js`).
+ * FlatMap — 2D map via MapLibre GL JS. Countries and US states share a uniform dark land fill (no graph coloring).
  */
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useMemo, useState } from 'react'
+import useShareCameraBridge from '../../hooks/useShareCameraBridge'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { useAtlasStore } from '../../store/atlasStore'
 import { getTimezoneViewCenter } from '../../utils/geo'
 import { isMobileDevice } from '../../config/qualityTiers'
 import { DIMENSION_COLORS } from '../../core/eventSchema'
-import {
-  applyGreedyStepToCollection,
-  GREEDY_ANIM_STEP_MS,
-  isMapFocusedOnUsa,
-  prepareUsGreedyColoringPresentation,
-} from '../../map/usStatesGreedyColoringPresentation'
+import { GIBS_IMAGERY_LAYERS, GIBS_IMAGERY_LAYER_KEYS, gibsMaplibreTiles } from '../../config/gibsBasemap'
+import { terminatorGeoJsonLine } from '../../core/solarTerminator'
+import useGlobeLayerEvents from '../../hooks/useGlobeLayerEvents'
+import { showDetectionLabel as getDetectionLabel } from '../../core/detectionLabels'
+
+function buildDetectionLabelFeatures(events, opts) {
+  if (!opts.detectionMode) return []
+  return events
+    .map((e, idx) => {
+      const label = getDetectionLabel(e, idx, opts)
+      if (!label || e.lat == null || e.lng == null) return null
+      return {
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [e.lng, e.lat] },
+        properties: { label },
+      }
+    })
+    .filter(Boolean)
+}
 
 const URL_COUNTRIES =
   'https://d2ad6b4ur7yvpq.cloudfront.net/naturalearth-3.3.0/ne_50m_admin_0_countries.geojson'
@@ -29,20 +42,11 @@ const BASE_LABEL_TILES = [
   'https://d.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}.png',
 ]
 
-/** Warm vintage palette: indices 0–2 = muted R, G, B (sRGB); then amber → mustard → teal → plum → rose */
-const ATLAS_COLORS = [
-  '#b8574d',
-  '#6f9178',
-  '#5f7a9e',
-  '#c2783f',
-  '#c9a03d',
-  '#5f918c',
-  '#8a7398',
-  '#b07888',
-]
-
 /** Navy-tinted canvas; aligns with Carto dark_no_labels oceans when tiles load */
 const OCEAN_BG = '#0a1426'
+
+/** Landmass fill — near-ocean charcoal so the map reads as a single dark plot with subtle borders */
+const LAND_FILL = '#0c1628'
 
 const DEFAULT_ZOOM = 2.5
 const MIN_ZOOM = 1.5
@@ -66,24 +70,6 @@ function regionKeyForState(feat) {
   return null
 }
 
-function injectColors(features, colorAssignment, keyFn) {
-  const out = []
-  for (const f of features) {
-    const key = keyFn(f)
-    if (key == null) continue
-    const idx = colorAssignment[key]
-    const c =
-      idx != null && ATLAS_COLORS[idx] != null
-        ? ATLAS_COLORS[idx]
-        : ATLAS_COLORS[0]
-    out.push({
-      ...f,
-      properties: { ...f.properties, atlas_color: c },
-    })
-  }
-  return out
-}
-
 function buildEventFeatures(events) {
   return events
     .filter((e) => e.lat != null && e.lng != null)
@@ -104,14 +90,47 @@ function buildEventFeatures(events) {
 export default function FlatMap({ onGlobeReady }) {
   const containerRef = useRef(null)
   const mapRef = useRef(null)
+  const [mapReady, setMapReady] = useState(false)
   const onReadyRef = useRef(onGlobeReady)
   onReadyRef.current = onGlobeReady
 
-  const events = useAtlasStore((s) => s.events)
+  const dataLayers = useAtlasStore((s) => s.dataLayers)
+  const sentinel2Scene = useAtlasStore((s) => s.sentinel2Scene)
+  const tacticalMode = useAtlasStore((s) => s.tacticalMode)
+  const detectionMode = useAtlasStore((s) => s.detectionMode)
+  const detectionLabelDensity = useAtlasStore((s) => s.detectionLabelDensity)
+  const selectedEvent = useAtlasStore((s) => s.selectedEvent)
+  const { filterFlatMapEvents } = useGlobeLayerEvents()
+  const visibleEvents = useMemo(() => filterFlatMapEvents(), [filterFlatMapEvents])
   const setSelectedMarker = useAtlasStore((s) => s.setSelectedMarker)
   const setSelectedEvent = useAtlasStore((s) => s.setSelectedEvent)
   const setZoomLevel = useAtlasStore((s) => s.setZoomLevel)
   const setOnResetView = useAtlasStore((s) => s.setOnResetView)
+  const setOnFlyToLocation = useAtlasStore((s) => s.setOnFlyToLocation)
+
+  useShareCameraBridge({
+    ready: mapReady,
+    apply: (cam) => {
+      const m = mapRef.current
+      if (!m || cam?.lat == null) return
+      const z = useAtlasStore.getState().zoomLevel
+      const zoom = Number.isFinite(z)
+        ? MIN_ZOOM + z * (MAX_ZOOM - MIN_ZOOM)
+        : DEFAULT_ZOOM
+      m.jumpTo({ center: [cam.lng, cam.lat], zoom })
+    },
+    report: () => {
+      const m = mapRef.current
+      if (!m) return null
+      const c = m.getCenter()
+      const z = m.getZoom()
+      return {
+        lat: c.lat,
+        lng: c.lng,
+        rangeM: undefined,
+      }
+    },
+  })
 
   useEffect(() => {
     const el = containerRef.current
@@ -119,87 +138,26 @@ export default function FlatMap({ onGlobeReady }) {
 
     let map = null
     let cancelled = false
-    /** Greedy USA demo timer — cleared on unmount / leaving viewport */
-    let usaGreedyAnimTimer = null
 
     const home = getTimezoneViewCenter()
     const center = [home.lng, home.lat]
     const pr = isMobileDevice() ? 1 : Math.min(typeof window !== 'undefined' ? window.devicePixelRatio : 1, 2)
 
     ;(async () => {
-      const [resColor, resC, resS] = await Promise.all([
-        fetch('/atlas-map-coloring.json'),
-        fetch(URL_COUNTRIES),
-        fetch(URL_STATES),
-      ])
+      const [resC, resS] = await Promise.all([fetch(URL_COUNTRIES), fetch(URL_STATES)])
       if (cancelled) return
-      if (!resColor.ok) throw new Error(`atlas-map-coloring.json ${resColor.status}`)
       if (!resC.ok) throw new Error(`countries ${resC.status}`)
       if (!resS.ok) throw new Error(`states ${resS.status}`)
 
-      const coloring = await resColor.json()
       const countries = await resC.json()
       const admin1 = await resS.json()
       if (cancelled) return
 
-      const assignment = coloring.colorAssignment || {}
-      const countryFeatures = injectColors(countries.features || [], assignment, regionKeyForCountry)
-      const usStates = (admin1.features || [])
-        .map((f) => {
-          if (!regionKeyForState(f)) return null
-          return f
-        })
-        .filter(Boolean)
-      const usaGreedy = prepareUsGreedyColoringPresentation(usStates, ATLAS_COLORS)
-      const usaGreedyBaselineStatesFc = structuredClone(usaGreedy.collection)
+      const countryFeatures = (countries.features || []).filter((f) => regionKeyForCountry(f) != null)
+      const stateFeatures = (admin1.features || []).filter((f) => regionKeyForState(f) != null)
 
-      const coloredCountries = { type: 'FeatureCollection', features: countryFeatures }
-      const coloredStates = usaGreedy.collection
-
-      let usaGreedyDone = false
-      let usaGreedyWorkingFc = structuredClone(usaGreedyBaselineStatesFc)
-
-      function onViewportForUsaGreedy(mapInstance) {
-        if (cancelled || !mapInstance) return
-        const focused = isMapFocusedOnUsa(mapInstance)
-        if (!focused) {
-          if (usaGreedyAnimTimer != null) {
-            clearInterval(usaGreedyAnimTimer)
-            usaGreedyAnimTimer = null
-          }
-          usaGreedyDone = false
-          usaGreedyWorkingFc = structuredClone(usaGreedyBaselineStatesFc)
-          const stOff = mapInstance.getSource('states')
-          if (stOff && typeof stOff.setData === 'function') {
-            stOff.setData(usaGreedyWorkingFc)
-          }
-          return
-        }
-        if (usaGreedyDone || usaGreedyAnimTimer != null) return
-
-        usaGreedyWorkingFc = structuredClone(usaGreedyBaselineStatesFc)
-        const stStart = mapInstance.getSource('states')
-        if (stStart && typeof stStart.setData === 'function') {
-          stStart.setData(usaGreedyWorkingFc)
-        }
-
-        let stepIdx = 0
-        usaGreedyAnimTimer = setInterval(() => {
-          if (cancelled || !mapRef.current) return
-          if (stepIdx >= usaGreedy.steps.length) {
-            clearInterval(usaGreedyAnimTimer)
-            usaGreedyAnimTimer = null
-            usaGreedyDone = true
-            return
-          }
-          const step = usaGreedy.steps[stepIdx++]
-          usaGreedyWorkingFc = applyGreedyStepToCollection(usaGreedyWorkingFc, step.regionId, step.colorHex)
-          const st = mapRef.current.getSource('states')
-          if (st && typeof st.setData === 'function') {
-            st.setData(usaGreedyWorkingFc)
-          }
-        }, GREEDY_ANIM_STEP_MS)
-      }
+      const landCountriesFc = { type: 'FeatureCollection', features: countryFeatures }
+      const landStatesFc = { type: 'FeatureCollection', features: stateFeatures }
 
       if (cancelled) return
 
@@ -236,9 +194,48 @@ export default function FlatMap({ onGlobeReady }) {
         if (cancelled) return
         map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right')
 
-        map.addSource('countries', { type: 'geojson', data: coloredCountries })
-        map.addSource('states', { type: 'geojson', data: coloredStates })
+        map.addSource('countries', { type: 'geojson', data: landCountriesFc })
+        map.addSource('states', { type: 'geojson', data: landStatesFc })
         map.addSource('events', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
+        const dl0 = useAtlasStore.getState().dataLayers || {}
+        let anyGibs = false
+        for (const key of GIBS_IMAGERY_LAYER_KEYS) {
+          const cfg = GIBS_IMAGERY_LAYERS[key]
+          const srcId = `gibs-${key}`
+          map.addSource(srcId, {
+            type: 'raster',
+            tiles: gibsMaplibreTiles(key),
+            tileSize: 256,
+            attribution: cfg.attribution,
+            maxzoom: key === 'gibsTrueColor' || key === 'gibsFires' ? 9 : 6,
+          })
+          const visible = dl0[key] === true
+          if (visible) anyGibs = true
+          map.addLayer({
+            id: srcId,
+            type: 'raster',
+            source: srcId,
+            layout: { visibility: visible ? 'visible' : 'none' },
+            paint: { 'raster-opacity': cfg.opacity, 'raster-fade-duration': 200 },
+          })
+        }
+
+        map.addSource('terminator', {
+          type: 'geojson',
+          data: terminatorGeoJsonLine(),
+        })
+        const termOn = dl0.terminator !== false
+        map.addLayer({
+          id: 'terminator-line',
+          type: 'line',
+          source: 'terminator',
+          layout: { visibility: termOn ? 'visible' : 'none' },
+          paint: {
+            'line-color': 'rgba(120, 220, 255, 0.75)',
+            'line-width': 2,
+            'line-blur': 0.5,
+          },
+        })
         map.addSource('basemap-labels', {
           type: 'raster',
           tiles: BASE_LABEL_TILES,
@@ -252,8 +249,8 @@ export default function FlatMap({ onGlobeReady }) {
           type: 'fill',
           source: 'countries',
           paint: {
-            'fill-color': ['get', 'atlas_color'],
-            'fill-opacity': 0.88,
+            'fill-color': LAND_FILL,
+            'fill-opacity': anyGibs ? 0.12 : 0.92,
             'fill-antialias': true,
           },
         })
@@ -285,8 +282,8 @@ export default function FlatMap({ onGlobeReady }) {
           source: 'states',
           minzoom: 3,
           paint: {
-            'fill-color': ['get', 'atlas_color'],
-            'fill-opacity': 0.88,
+            'fill-color': LAND_FILL,
+            'fill-opacity': anyGibs ? 0.12 : 0.92,
             'fill-antialias': true,
           },
         })
@@ -342,6 +339,28 @@ export default function FlatMap({ onGlobeReady }) {
             'circle-stroke-width': 0.8,
           },
         })
+        map.addSource('events-detection', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] },
+        })
+        map.addLayer({
+          id: 'events-detection-labels',
+          type: 'symbol',
+          source: 'events-detection',
+          layout: {
+            visibility: 'none',
+            'text-field': ['get', 'label'],
+            'text-size': 10,
+            'text-offset': [0, -1.4],
+            'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
+            'text-allow-overlap': true,
+          },
+          paint: {
+            'text-color': '#88ffaa',
+            'text-halo-color': 'rgba(0,0,0,0.85)',
+            'text-halo-width': 1.2,
+          },
+        })
 
         const evSrc = map.getSource('events')
         if (evSrc && typeof evSrc.setData === 'function') {
@@ -356,11 +375,28 @@ export default function FlatMap({ onGlobeReady }) {
           mapRef.current.flyTo({ center, zoom: DEFAULT_ZOOM, duration: 1200 })
         })
 
-        const syncUsaGreedyViewport = () => onViewportForUsaGreedy(map)
-        map.on('moveend', syncUsaGreedyViewport)
-        map.on('zoomend', syncUsaGreedyViewport)
-        syncUsaGreedyViewport()
+        setOnFlyToLocation((target) => {
+          const m = mapRef.current
+          if (!m || !target) return
+          const { lat, lng, viewport, bbox } = target
+          const box = bbox || viewport
+          const centerLat = Number.isFinite(lat) ? lat : box ? (box.south + box.north) / 2 : NaN
+          const centerLng = Number.isFinite(lng) ? lng : box ? (box.west + box.east) / 2 : NaN
+          if (!Number.isFinite(centerLat) || !Number.isFinite(centerLng)) return
+          let zoom = 12
+          if (box) {
+            const latSpan = Math.abs(box.north - box.south)
+            const lngSpan = Math.abs(box.east - box.west)
+            const span = Math.max(latSpan, lngSpan)
+            if (span > 8) zoom = 5
+            else if (span > 2) zoom = 8
+            else if (span > 0.5) zoom = 10
+            else zoom = 13
+          }
+          m.flyTo({ center: [centerLng, centerLat], zoom, duration: 1400 })
+        })
 
+        setMapReady(true)
         onReadyRef.current?.()
       })
 
@@ -396,18 +432,16 @@ export default function FlatMap({ onGlobeReady }) {
 
     return () => {
       cancelled = true
-      if (usaGreedyAnimTimer != null) {
-        clearInterval(usaGreedyAnimTimer)
-        usaGreedyAnimTimer = null
-      }
+      setMapReady(false)
       setOnResetView(null)
+      setOnFlyToLocation(null)
       mapRef.current = null
       if (map) {
         map.remove()
         map = null
       }
     }
-  }, [setOnResetView, setSelectedEvent, setSelectedMarker, setZoomLevel])
+  }, [setOnResetView, setOnFlyToLocation, setSelectedEvent, setSelectedMarker, setZoomLevel])
 
   useEffect(() => {
     const m = mapRef.current
@@ -416,10 +450,128 @@ export default function FlatMap({ onGlobeReady }) {
     if (src && typeof src.setData === 'function') {
       src.setData({
         type: 'FeatureCollection',
-        features: buildEventFeatures(events),
+        features: buildEventFeatures(visibleEvents),
       })
     }
-  }, [events])
+  }, [visibleEvents])
 
-  return <div ref={containerRef} className="fixed inset-0 z-0 flatmap-container" />
+  useEffect(() => {
+    const m = mapRef.current
+    if (!m || !mapReady) return
+    const src = m.getSource('events-detection')
+    if (!src || typeof src.setData !== 'function') return
+    const detOpts = {
+      detectionMode,
+      detectionLabelDensity,
+      selectedEventId: selectedEvent?.id,
+    }
+    src.setData({
+      type: 'FeatureCollection',
+      features: buildDetectionLabelFeatures(visibleEvents, detOpts),
+    })
+    if (m.getLayer('events-detection-labels')) {
+      m.setLayoutProperty(
+        'events-detection-labels',
+        'visibility',
+        detectionMode ? 'visible' : 'none',
+      )
+    }
+    if (m.getLayer('events-circle')) {
+      m.setPaintProperty(
+        'events-circle',
+        'circle-stroke-width',
+        detectionMode ? 1.6 : 0.8,
+      )
+      m.setPaintProperty(
+        'events-circle',
+        'circle-stroke-color',
+        detectionMode ? 'rgba(136, 255, 170, 0.55)' : 'rgba(255,255,255,0.3)',
+      )
+    }
+  }, [visibleEvents, detectionMode, detectionLabelDensity, selectedEvent?.id, mapReady])
+
+  useEffect(() => {
+    const m = mapRef.current
+    if (!m) return
+    let anyGibs = false
+    for (const key of GIBS_IMAGERY_LAYER_KEYS) {
+      const layerId = `gibs-${key}`
+      if (!m.getLayer(layerId)) continue
+      const on = dataLayers?.[key] === true
+      if (on) anyGibs = true
+      m.setLayoutProperty(layerId, 'visibility', on ? 'visible' : 'none')
+    }
+    if (m.getLayer('terminator-line')) {
+      const termOn = dataLayers?.terminator !== false
+      m.setLayoutProperty('terminator-line', 'visibility', termOn ? 'visible' : 'none')
+    }
+    if (m.getLayer('countries-fill')) {
+      m.setPaintProperty('countries-fill', 'fill-opacity', anyGibs ? 0.12 : 0.92)
+    }
+    if (m.getLayer('states-fill')) {
+      m.setPaintProperty('states-fill', 'fill-opacity', anyGibs ? 0.12 : 0.92)
+    }
+  }, [dataLayers])
+
+  useEffect(() => {
+    const m = mapRef.current
+    if (!m?.getSource('terminator')) return
+    const tick = () => {
+      const src = m.getSource('terminator')
+      if (src && typeof src.setData === 'function') {
+        src.setData(terminatorGeoJsonLine())
+      }
+    }
+    tick()
+    const id = setInterval(tick, 60_000)
+    return () => clearInterval(id)
+  }, [])
+
+  /** Phase 6 — on-demand Sentinel-2 thumbnail overlay (Copernicus STAC bbox) */
+  useEffect(() => {
+    const m = mapRef.current
+    if (!m || !mapReady) return
+
+    const removeSentinel = () => {
+      if (m.getLayer('sentinel2-scene')) m.removeLayer('sentinel2-scene')
+      if (m.getSource('sentinel2-scene')) m.removeSource('sentinel2-scene')
+    }
+
+    const scene = sentinel2Scene
+    if (!scene?.thumbnailUrl || !Array.isArray(scene.bbox) || scene.bbox.length < 4) {
+      removeSentinel()
+      return
+    }
+
+    const [west, south, east, north] = scene.bbox
+    const coordinates = [
+      [west, north],
+      [east, north],
+      [east, south],
+      [west, south],
+    ]
+
+    if (m.getSource('sentinel2-scene')) {
+      removeSentinel()
+    }
+
+    m.addSource('sentinel2-scene', {
+      type: 'image',
+      url: scene.thumbnailUrl,
+      coordinates,
+    })
+    m.addLayer({
+      id: 'sentinel2-scene',
+      type: 'raster',
+      source: 'sentinel2-scene',
+      paint: { 'raster-opacity': 0.88, 'raster-fade-duration': 300 },
+    })
+  }, [sentinel2Scene, mapReady])
+
+  return (
+    <div
+      ref={containerRef}
+      className={`fixed inset-0 z-0 flatmap-container${tacticalMode ? ' atlas-tactical-mode' : ''}`}
+    />
+  )
 }

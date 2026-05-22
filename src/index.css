@@ -1,4 +1,4 @@
-@import "tailwindcss";
+﻿@import "tailwindcss";
 
 :root {
   --bg: #030712;
@@ -7,7 +7,7 @@
   --glass-hover: rgba(255, 255, 255, 0.08);
   --glass-blur: 12px;
 
-  /* Surfaces — frosted glass, no scanlines (see MDN backdrop-filter / glassmorphism) */
+  /* Surfaces â€” frosted glass, no scanlines (see MDN backdrop-filter / glassmorphism) */
   --header-glass-top: rgba(12, 16, 28, 0.45);
   --header-glass-bottom: rgba(12, 16, 28, 0.32);
   --header-blur: 24px;
@@ -26,7 +26,7 @@
   /* Typography */
   --font-data: 'JetBrains Mono', monospace;
   --font-ui: 'Rajdhani', sans-serif;
-  /** Logo / hero wordmark — same “space age” face as original ATLA letter blocks */
+  /** Logo / hero wordmark â€” same â€œspace ageâ€ face as original ATLA letter blocks */
   --font-atlas-wordmark: 'Bebas Neue', sans-serif;
   --font-hud: 'Courier Prime', 'JetBrains Mono', monospace;
   --font-size-xs: 0.625rem;
@@ -44,7 +44,7 @@
   --hud-padding: 16px;
   --panel-gap: 12px;
 
-  /* Dimension colors — encodes what kind of event */
+  /* Dimension colors â€” encodes what kind of event */
   --dim-safety: #E24B4A;
   --dim-governance: #7F77DD;
   --dim-economy: #EF9F27;
@@ -126,7 +126,7 @@ body,
   border-radius: 2px;
 }
 
-/* Cesium widget overrides — hide all default UI chrome */
+/* Cesium widget overrides â€” hide all default UI chrome */
 .cesium-viewer-bottom,
 .cesium-viewer-timelineContainer,
 .cesium-viewer-animationContainer,
@@ -222,7 +222,7 @@ body,
   }
 }
 
-/* ── Onboarding / setup page (template-inspired, transparent) ── */
+/* â”€â”€ Onboarding / setup page (template-inspired, transparent) â”€â”€ */
 .onboarding-page {
   --ob-blue: rgba(100, 200, 255, 1);
   --ob-blue-dim: rgba(80, 180, 255, 0.12);
@@ -259,7 +259,7 @@ body,
   max-width: min(90vw, 28rem);
 }
 
-/* Auth step — optional soft focus (confirmation only); main form is borderless in JSX */
+/* Auth step â€” optional soft focus (confirmation only); main form is borderless in JSX */
 .auth-step-card {
   border-radius: 16px;
   border: none;
@@ -269,7 +269,7 @@ body,
   box-shadow: none;
 }
 
-/* Minimal login stack — Rajdhani, no grid boxes */
+/* Minimal login stack â€” Rajdhani, no grid boxes */
 .auth-step-minimal {
   font-family: var(--font-ui);
 }
@@ -284,7 +284,7 @@ body,
   text-shadow: 2px 3px 0 rgba(0, 0, 0, 0.9), 3px 6px 16px rgba(0, 0, 0, 0.6);
 }
 
-/* ATLAS / logo — letter glitch / decode */
+/* ATLAS / logo â€” letter glitch / decode */
 .atlas-logo {
   display: inline-flex;
   align-items: flex-end;
@@ -344,7 +344,7 @@ body,
   transition: transform 0.4s cubic-bezier(0.23, 1, 0.32, 1), color 0.6s ease, text-shadow 0.6s ease;
 }
 
-/* SVG wordmark + onboarding glitch slots — glow lives on `.atlas-wordmark-img--glow`, not the whole hit area */
+/* SVG wordmark + onboarding glitch slots â€” glow lives on `.atlas-wordmark-img--glow`, not the whole hit area */
 .atlas-logo.atlas-logo--modern {
   position: relative;
   gap: 0;
@@ -426,7 +426,7 @@ body,
   object-fit: contain;
 }
 
-/* Starfield / HUD: soft “space age” glow on the letters only (no plate — transparent SVG) */
+/* Starfield / HUD: soft â€œspace ageâ€ glow on the letters only (no plate â€” transparent SVG) */
 .atlas-wordmark-img--glow {
   filter:
     drop-shadow(0 0 1px rgba(255, 255, 255, 0.65)) drop-shadow(0 0 10px rgba(186, 230, 253, 0.42)) drop-shadow(0 0 28px rgba(56, 189, 248, 0.28)) drop-shadow(0 0 48px rgba(59, 130, 246, 0.12));
@@ -436,7 +436,7 @@ body,
   background: transparent;
 }
 
-/* ── Landing wordmark: larger, relaxed horizontal rhythm, soft edge halation ── */
+/* â”€â”€ Landing wordmark: larger, relaxed horizontal rhythm, soft edge halation â”€â”€ */
 .stitch-landing .atlas-wordmark--landing {
   display: block;
   height: clamp(34px, 6.2vw, 54px);
@@ -621,7 +621,7 @@ button.atlas-logo-header-btn:focus-visible {
   transition: background 0.35s ease-out;
 }
 
-/* HUD header actions — setup-page style: minimal, border, accent hover */
+/* HUD header actions â€” setup-page style: minimal, border, accent hover */
 .hud-label {
   font-family: "Courier Prime", "JetBrains Mono", monospace;
 }
@@ -658,7 +658,7 @@ button.atlas-logo-header-btn:focus-visible {
   box-shadow: 0 0 12px rgba(0, 207, 255, 0.2);
 }
 
-/* Filters dropdown — match HUD/Onboarding minimal style */
+/* Filters dropdown â€” match HUD/Onboarding minimal style */
 .filters-panel {
   font-family: "Courier Prime", "JetBrains Mono", monospace;
 }
@@ -768,7 +768,7 @@ button.atlas-logo-header-btn:focus-visible {
   opacity: 0.6;
 }
 
-/* ── News Feed Overlay — cooler tint, heavier blur vs top HUD (glass / “frosted” panels) ── */
+/* â”€â”€ News Feed Overlay â€” cooler tint, heavier blur vs top HUD (glass / â€œfrostedâ€ panels) â”€â”€ */
 .feed-overlay {
   position: absolute;
   bottom: 100%;
@@ -790,7 +790,7 @@ button.atlas-logo-header-btn:focus-visible {
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
-/* Soft top vignette only — no opaque band */
+/* Soft top vignette only â€” no opaque band */
 .feed-overlay::before {
   content: "";
   position: absolute;
@@ -803,7 +803,7 @@ button.atlas-logo-header-btn:focus-visible {
   z-index: 1;
 }
 
-/* Feed chrome — separate from panel body */
+/* Feed chrome â€” separate from panel body */
 .feed-header {
   display: flex;
   flex-wrap: wrap;
@@ -1119,7 +1119,7 @@ button.atlas-logo-header-btn:focus-visible {
   opacity: 0.6;
 }
 
-/* ── Settings Panel ── */
+/* â”€â”€ Settings Panel â”€â”€ */
 .settings-panel {
   position: fixed;
   top: 50px;
@@ -1352,7 +1352,7 @@ button.atlas-logo-header-btn:focus-visible {
   border-color: rgba(0, 207, 255, 0.25);
 }
 
-/* ── 2D Map (MapLibre) ── */
+/* â”€â”€ 2D Map (MapLibre) â”€â”€ */
 .flatmap-container {
   width: 100%;
   height: 100%;
@@ -1407,7 +1407,7 @@ button.atlas-logo-header-btn:focus-visible {
   color: rgba(255, 255, 255, 0.85);
 }
 
-/* ── ATLAS v4 — Unified Header Bar ── */
+/* â”€â”€ ATLAS v4 â€” Unified Header Bar â”€â”€ */
 
 /* Three columns: brand left, mission clock center, actions right */
 .hud-header {
@@ -1472,7 +1472,7 @@ button.atlas-logo-header-btn:focus-visible {
   margin-left: 0;
 }
 
-/* Mission clock — matches header HUD typography, no starfield plate */
+/* Mission clock â€” matches header HUD typography, no starfield plate */
 .hud-mission-clock {
   position: relative;
   z-index: 1;
@@ -1732,284 +1732,6 @@ button.atlas-logo-header-btn:focus-visible {
   box-shadow: inset 2px 0 0 0 var(--accent, #00cfff);
 }
 
-/* Ambient track picker (portal to body) */
-.bgm-track-menu {
-  width: 260px;
-  max-width: calc(100vw - 16px);
-  padding: 10px 10px 8px;
-  border-radius: 10px;
-  background: rgba(8, 12, 22, 0.94);
-  border: 1px solid rgba(0, 165, 255, 0.28);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(10px);
-}
-
-.bgm-track-menu__title {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: rgba(180, 215, 255, 0.85);
-  margin: 0 0 8px 4px;
-}
-
-.bgm-track-menu__list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.bgm-track-menu__item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  text-align: left;
-  padding: 8px 10px;
-  margin: 0;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: rgba(230, 240, 255, 0.92);
-  font-size: 13px;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-.bgm-track-menu__item:hover,
-.bgm-track-menu__item:focus-visible {
-  background: rgba(0, 150, 255, 0.12);
-  outline: none;
-}
-
-.bgm-track-menu__item--active {
-  background: rgba(0, 150, 255, 0.18);
-  color: #b8e8ff;
-}
-
-.bgm-track-menu__check {
-  display: inline-block;
-  width: 1em;
-  font-size: 12px;
-  color: rgba(0, 210, 255, 0.95);
-}
-
-.bgm-track-menu__volume {
-  margin-top: 10px;
-  padding: 8px 4px 2px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.bgm-track-menu__volume-label {
-  display: block;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: rgba(180, 215, 255, 0.85);
-  margin: 0 0 6px 4px;
-}
-
-.bgm-track-menu__volume-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.bgm-track-menu__range {
-  flex: 1;
-  min-width: 0;
-  height: 8px;
-  accent-color: rgba(0, 195, 255, 0.95);
-  cursor: pointer;
-}
-
-.bgm-track-menu__volume-pct {
-  flex: 0 0 38px;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  color: rgba(200, 220, 255, 0.8);
-  text-align: right;
-}
-
-.bgm-track-menu__hint {
-  margin: 10px 4px 0;
-  font-size: 10px;
-  line-height: 1.35;
-  color: rgba(160, 180, 210, 0.55);
-}
-
-.bgm-track-menu__hint code {
-  font-size: 9px;
-  color: rgba(140, 200, 255, 0.65);
-}
-
-.bgm-track-menu__code {
-  font-size: 9px;
-  color: rgba(140, 200, 255, 0.7);
-  word-break: break-all;
-}
-
-.bgm-track-menu--wide {
-  width: 300px;
-}
-
-.bgm-track-menu__providers {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 0 0 10px 2px;
-}
-
-.bgm-track-menu__provider-pill {
-  padding: 4px 8px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(190, 210, 240, 0.75);
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  cursor: pointer;
-  transition:
-    background 0.15s ease,
-    border-color 0.15s ease,
-    color 0.15s ease;
-}
-
-.bgm-track-menu__provider-pill:hover {
-  border-color: rgba(0, 165, 255, 0.35);
-  color: rgba(220, 235, 255, 0.95);
-}
-
-.bgm-track-menu__provider-pill--active {
-  border-color: rgba(0, 195, 255, 0.55);
-  background: rgba(0, 120, 200, 0.2);
-  color: #b8e8ff;
-}
-
-.bgm-track-menu__section-label {
-  display: block;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: rgba(160, 190, 230, 0.65);
-  margin: 0 0 6px 4px;
-}
-
-.bgm-track-menu__panel {
-  margin-bottom: 6px;
-}
-
-.bgm-track-menu__cta {
-  display: block;
-  width: calc(100% - 8px);
-  margin: 0 4px 8px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(0, 165, 255, 0.35);
-  background: rgba(0, 120, 200, 0.18);
-  color: #b8e8ff;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-.bgm-track-menu__cta:hover {
-  background: rgba(0, 140, 220, 0.28);
-}
-
-.bgm-track-menu__cta--link {
-  text-align: center;
-  text-decoration: none;
-  box-sizing: border-box;
-}
-
-.bgm-track-menu__input {
-  width: calc(100% - 8px);
-  margin: 0 4px 8px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.35);
-  color: rgba(230, 240, 255, 0.95);
-  font-size: 11px;
-  font-family: var(--font-data, ui-monospace, monospace);
-  outline: none;
-}
-
-.bgm-track-menu__input:focus {
-  border-color: rgba(0, 195, 255, 0.45);
-}
-
-.bgm-track-menu__disconnect {
-  display: block;
-  width: calc(100% - 8px);
-  margin: 6px 4px 0;
-  padding: 6px 8px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: rgba(255, 160, 140, 0.75);
-  font-size: 11px;
-  cursor: pointer;
-  text-align: center;
-}
-
-.bgm-track-menu__disconnect:hover {
-  color: rgba(255, 190, 170, 0.95);
-}
-
-.bgm-track-menu__list--scroll {
-  max-height: 168px;
-  overflow-y: auto;
-  margin-bottom: 4px;
-}
-
-.bgm-track-menu__row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin: 0 4px 4px;
-  gap: 8px;
-}
-
-.bgm-track-menu__linkish {
-  flex-shrink: 0;
-  border: none;
-  background: none;
-  color: rgba(140, 200, 255, 0.75);
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  cursor: pointer;
-}
-
-.bgm-track-menu__linkish:hover {
-  color: #b8e8ff;
-}
-
-.bgm-track-menu__warn {
-  margin: 0 4px 8px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  background: rgba(180, 80, 40, 0.12);
-  border: 1px solid rgba(255, 160, 100, 0.2);
-  font-size: 10px;
-  line-height: 1.4;
-  color: rgba(255, 200, 170, 0.92);
-}
-
-.bgm-track-menu__item .truncate {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
-
 .hud-header-right {
   display: flex;
   align-items: center;
@@ -2150,7 +1872,7 @@ button.atlas-logo-header-btn:focus-visible {
   margin: 3px 6px;
 }
 
-/* ── Header place search (Google Earth–style) ── */
+/* â”€â”€ Header place search (Google Earthâ€“style) â”€â”€ */
 .hud-search {
   position: relative;
   display: flex;
@@ -2341,7 +2063,7 @@ button.atlas-logo-header-btn:focus-visible {
   }
 }
 
-/* ── Google-Earth-style place info card ── */
+/* â”€â”€ Google-Earth-style place info card â”€â”€ */
 .search-result-card {
   position: fixed;
   top: 56px;
@@ -2517,7 +2239,7 @@ button.atlas-logo-header-btn:focus-visible {
   pointer-events: auto;
 }
 
-/* ── ATLAS v4 — Event System ── */
+/* â”€â”€ ATLAS v4 â€” Event System â”€â”€ */
 
 .priority-shape {
   width: 8px;
@@ -2645,6 +2367,95 @@ button.atlas-logo-header-btn:focus-visible {
   opacity: 0.75;
 }
 
+/* Phase 6 â€” stretch signals (Bluesky, Fact Check, Sentinel-2) */
+.stretch-signals-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.stretch-signals-block {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.stretch-fact-check-block {
+  border-color: rgba(34, 197, 94, 0.25);
+  background: rgba(34, 197, 94, 0.06);
+}
+
+.stretch-social-reach-row {
+  display: flex;
+  gap: 12px;
+  font-family: var(--font-data);
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.85);
+  margin-top: 4px;
+}
+
+.stretch-fact-check-rating {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  color: #22c55e;
+  margin-top: 2px;
+}
+
+.stretch-fact-match {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.stretch-fact-match-text {
+  font-family: var(--font-data);
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.stretch-signals-hint {
+  font-family: var(--font-data);
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.35);
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+.stretch-signals-warn {
+  color: rgba(255, 170, 0, 0.75);
+}
+
+.stretch-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.stretch-link:hover {
+  text-decoration: underline;
+}
+
+.stretch-sentinel-thumb-wrap {
+  display: block;
+  margin-top: 6px;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.stretch-sentinel-thumb {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 140px;
+  object-fit: cover;
+}
+
 .event-severity-bar {
   display: flex;
   gap: 3px;
@@ -2679,7 +2490,7 @@ button.atlas-logo-header-btn:focus-visible {
   opacity: 1;
 }
 
-/* ── Dimension badge (civilian taxonomy) ── */
+/* â”€â”€ Dimension badge (civilian taxonomy) â”€â”€ */
 .event-dimension-badge {
   display: inline-flex;
   align-items: center;
@@ -2703,7 +2514,7 @@ button.atlas-logo-header-btn:focus-visible {
   flex-shrink: 0;
 }
 
-/* Priority indicator — subtle label next to dimension badge */
+/* Priority indicator â€” subtle label next to dimension badge */
 .event-priority-indicator {
   font-family: var(--font-hud);
   font-size: 8px;
@@ -2760,7 +2571,7 @@ button.atlas-logo-header-btn:focus-visible {
   background: rgba(74, 222, 128, 0.08);
 }
 
-/* ── Causal Thread ("Related Signals") ── */
+/* â”€â”€ Causal Thread ("Related Signals") â”€â”€ */
 .causal-thread {
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   padding-top: 10px;
@@ -2860,7 +2671,7 @@ button.atlas-logo-header-btn:focus-visible {
   color: rgba(255, 255, 255, 0.3);
 }
 
-/* ── Recency animations ── */
+/* â”€â”€ Recency animations â”€â”€ */
 @keyframes atlas-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
@@ -2879,7 +2690,7 @@ button.atlas-logo-header-btn:focus-visible {
   animation: atlas-glow 3s ease-in-out infinite;
 }
 
-/* Ticker priority-color dot variants — kept for backward compat */
+/* Ticker priority-color dot variants â€” kept for backward compat */
 .ticker-dot-latent {
   background-color: var(--priority-p3);
 }
@@ -2948,7 +2759,7 @@ button.atlas-logo-header-btn:focus-visible {
   letter-spacing: 0.15em;
 }
 
-/* ── Accessibility ── */
+/* â”€â”€ Accessibility â”€â”€ */
 
 @media (prefers-reduced-motion: reduce) {
 
@@ -3184,8 +2995,8 @@ button.atlas-logo-header-btn:focus-visible {
 
 /* Narrow touch devices (phones): tighten the header icon hit-target so
    the full 5-zone header never overflows the viewport. The mobile block
-   above sets 36×36; this override wins over the generic touch rule which
-   forces 44×44 on any coarse pointer. */
+   above sets 36Ã—36; this override wins over the generic touch rule which
+   forces 44Ã—44 on any coarse pointer. */
 @media (max-width: 768px) and (hover: none) and (pointer: coarse) {
   .hud-header .hud-icon-btn,
   .hud-header-right .hud-icon-btn,
@@ -3213,7 +3024,124 @@ button.atlas-logo-header-btn:focus-visible {
   }
 }
 
-/* ── Public landing (first visit / marketing) ── */
+/* â”€â”€ Atlas bootstrap loading gate (globe + all enabled layers) â”€â”€ */
+.atlas-bootstrap-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(ellipse at 50% 40%, rgba(8, 18, 32, 0.92) 0%, rgba(2, 4, 8, 0.97) 70%);
+  backdrop-filter: blur(12px);
+  pointer-events: all;
+}
+
+.atlas-bootstrap-card {
+  width: min(420px, calc(100vw - 2rem));
+  padding: 28px 26px 24px;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(10, 16, 28, 0.88);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+.atlas-bootstrap-brand {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.28em;
+  color: rgba(226, 232, 240, 0.95);
+  margin-bottom: 6px;
+}
+
+.atlas-bootstrap-tagline {
+  font-size: 13px;
+  color: rgba(148, 163, 184, 0.95);
+  margin: 0 0 18px;
+}
+
+.atlas-bootstrap-progress-track {
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.15);
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.atlas-bootstrap-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #378add, #00d4ff);
+}
+
+.atlas-bootstrap-progress-label {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(148, 163, 184, 0.85);
+  margin-bottom: 16px;
+  text-align: right;
+}
+
+.atlas-bootstrap-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 42vh;
+  overflow-y: auto;
+}
+
+.atlas-bootstrap-step {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 4px 10px;
+  align-items: baseline;
+  font-size: 12px;
+  color: rgba(203, 213, 225, 0.9);
+}
+
+.atlas-bootstrap-step-icon {
+  font-size: 11px;
+  text-align: center;
+  color: rgba(148, 163, 184, 0.8);
+}
+
+.atlas-bootstrap-step--ready .atlas-bootstrap-step-icon {
+  color: #4ade80;
+}
+
+.atlas-bootstrap-step--loading .atlas-bootstrap-step-icon {
+  color: #38bdf8;
+  animation: atlas-bootstrap-pulse 1.2s ease-in-out infinite;
+}
+
+.atlas-bootstrap-step--failed .atlas-bootstrap-step-icon {
+  color: #f87171;
+}
+
+.atlas-bootstrap-step-detail {
+  grid-column: 2;
+  font-size: 10px;
+  color: rgba(148, 163, 184, 0.75);
+  line-height: 1.35;
+}
+
+.atlas-bootstrap-hint {
+  margin: 16px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: rgba(148, 163, 184, 0.8);
+}
+
+@keyframes atlas-bootstrap-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
+/* â”€â”€ Public landing (first visit / marketing) â”€â”€ */
 /* Fallback base + starfield asset (globe.gl skysphere + immersive loading fallback) */
 .landing-page.stitch-landing {
   --stitch-landing-starfield: url('https://cdn.jsdelivr.net/npm/three-globe/example/img/night-sky.png');
@@ -3221,7 +3149,7 @@ button.atlas-logo-header-btn:focus-visible {
   scroll-behavior: smooth;
 }
 
-/* Stitch-style marketing landing — responsive shell (375 / 768 / 1024 / 1280+ targets) */
+/* Stitch-style marketing landing â€” responsive shell (375 / 768 / 1024 / 1280+ targets) */
 .stitch-landing {
   --stitch-content-max: 1280px;
   --stitch-pad-x: clamp(1rem, 2.8vw + 0.35rem, 2.75rem);
@@ -3264,7 +3192,7 @@ button.atlas-logo-header-btn:focus-visible {
   padding-right: max(env(safe-area-inset-right, 0px), var(--stitch-pad-x));
 }
 
-/* Floating header — no pill at top of page; glass pill appears after scroll (see LandingPage IO) */
+/* Floating header â€” no pill at top of page; glass pill appears after scroll (see LandingPage IO) */
 .stitch-nav-wrap--floating {
   padding-top: clamp(1rem, 2.5vw, 1.5rem);
   padding-bottom: clamp(0.5rem, 1.5vw, 0.75rem);
@@ -3279,7 +3207,7 @@ button.atlas-logo-header-btn:focus-visible {
   opacity: 0;
 }
 
-/* Same footprint at top vs scrolled — only the glass layer fades in (no padding/size jump) */
+/* Same footprint at top vs scrolled â€” only the glass layer fades in (no padding/size jump) */
 .stitch-nav-bar {
   --stitch-nav-pill-pad-y: 0.45rem;
   --stitch-nav-pill-pad-x: clamp(0.65rem, 1.8vw, 1.1rem);
@@ -3328,7 +3256,7 @@ button.atlas-logo-header-btn:focus-visible {
   opacity: 1;
 }
 
-/* At top of page the bar is still over the bright globe — light glass keeps nav readable */
+/* At top of page the bar is still over the bright globe â€” light glass keeps nav readable */
 .stitch-nav-wrap--floating:not(.stitch-nav-wrap--scrolled) .stitch-nav-bar::before {
   opacity: 0.48;
 }
@@ -3411,7 +3339,7 @@ button.atlas-logo-header-btn:focus-visible {
   gap: clamp(0.75rem, 2vw, 1.25rem);
 }
 
-/* ── Nav Login text link — subtle, reference-style ── */
+/* â”€â”€ Nav Login text link â€” subtle, reference-style â”€â”€ */
 .stitch-nav-login-link {
   font-family: var(--font-ui);
   font-size: 14px;
@@ -3429,7 +3357,7 @@ button.atlas-logo-header-btn:focus-visible {
   color: #f3f4f6;
 }
 
-/* ── Dark pill button — used in nav ("Try Free") and hero ("Get Started") ── */
+/* â”€â”€ Dark pill button â€” used in nav ("Try Free") and hero ("Get Started") â”€â”€ */
 .stitch-btn-dark-pill {
   display: inline-flex;
   align-items: center;
@@ -3469,7 +3397,7 @@ button.atlas-logo-header-btn:focus-visible {
   transform: scale(0.97);
 }
 
-/* Hero variant — larger, more commanding */
+/* Hero variant â€” larger, more commanding */
 .stitch-btn-dark-pill--hero {
   font-size: 15px;
   padding: 16px 38px;
@@ -3512,7 +3440,7 @@ button.atlas-logo-header-btn:focus-visible {
   color: rgba(226, 232, 240, 0.95);
 }
 
-/* ── Hero CTA row — side by side layout ── */
+/* â”€â”€ Hero CTA row â€” side by side layout â”€â”€ */
 .stitch-hero__cta-row {
   display: flex;
   align-items: center;
@@ -3521,7 +3449,7 @@ button.atlas-logo-header-btn:focus-visible {
   justify-content: center;
 }
 
-/* ── "See What You Get" text link in hero ── */
+/* â”€â”€ "See What You Get" text link in hero â”€â”€ */
 .stitch-hero-see-link {
   font-family: var(--font-ui);
   font-size: 14px;
@@ -3539,7 +3467,7 @@ button.atlas-logo-header-btn:focus-visible {
   color: rgba(226, 232, 240, 0.95);
 }
 
-/* Small variant — footer-sized pills */
+/* Small variant â€” footer-sized pills */
 .stitch-btn-dark-pill--sm {
   font-size: 11px;
   padding: 8px 18px;
@@ -3602,7 +3530,7 @@ button.atlas-logo-header-btn:focus-visible {
   color: rgba(125, 211, 252, 0.9);
 }
 
-/* ── Immersive / Explore mode — hide all content, fullscreen globe ── */
+/* â”€â”€ Immersive / Explore mode â€” hide all content, fullscreen globe â”€â”€ */
 .landing--immersive .stitch-landing__content {
   opacity: 0;
   pointer-events: none;
@@ -3635,7 +3563,7 @@ button.atlas-logo-header-btn:focus-visible {
   outline-offset: 2px;
 }
 
-/* ── Landing hero — redesigned: globe-first, copy bottom-anchored ── */
+/* â”€â”€ Landing hero â€” redesigned: globe-first, copy bottom-anchored â”€â”€ */
 
 .stitch-eyebrow {
   font-family: var(--font-ui);
@@ -3733,7 +3661,7 @@ button.atlas-logo-header-btn:focus-visible {
   color: #f8fafc;
 }
 
-/* Hero first fold — spacer pushes copy to bottom, globe owns the top */
+/* Hero first fold â€” spacer pushes copy to bottom, globe owns the top */
 .stitch-hero--fold {
   min-height: min(86dvh, 900px);
   display: flex;
@@ -3745,7 +3673,7 @@ button.atlas-logo-header-btn:focus-visible {
   flex-shrink: 0;
 }
 
-/* ── Ghost CTA — space-age outline button ── */
+/* â”€â”€ Ghost CTA â€” space-age outline button â”€â”€ */
 .stitch-btn-ghost {
   display: inline-flex;
   align-items: center;
@@ -3958,9 +3886,9 @@ button.atlas-logo-header-btn:focus-visible {
   gap: 0.65rem;
 }
 
-/* ─────────────────────────────────────────────────────────────────
-   ATLAS Landing — content sections (Why / Features / CTA / Footer)
-───────────────────────────────────────────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+   ATLAS Landing â€” content sections (Why / Features / CTA / Footer)
+â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 /* Shared section typography */
 .atlas-section-title {
@@ -3987,7 +3915,7 @@ button.atlas-logo-header-btn:focus-visible {
   text-wrap: balance;
 }
 
-/* ── Why ATLAS ── */
+/* â”€â”€ Why ATLAS â”€â”€ */
 .atlas-why {
   padding-block: clamp(5rem, 12vh, 9rem);
   border-top: 1px solid rgba(255, 255, 255, 0.05);
@@ -4001,7 +3929,7 @@ button.atlas-logo-header-btn:focus-visible {
   margin-bottom: 3.5rem;
 }
 
-/* "The Problem" header over globe — same treatment as hero fold (layout unchanged) */
+/* "The Problem" header over globe â€” same treatment as hero fold (layout unchanged) */
 .atlas-why .atlas-why__header {
   position: relative;
   isolation: isolate;
@@ -4127,13 +4055,13 @@ button.atlas-logo-header-btn:focus-visible {
   background: rgba(56, 189, 248, 0.5);
 }
 
-/* ── Feature Education ── */
+/* â”€â”€ Feature Education â”€â”€ */
 .atlas-features {
   padding-block: clamp(4rem, 10vh, 7rem);
   border-top: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-/* "What You Get" header over globe — same readability treatment (layout unchanged) */
+/* "What You Get" header over globe â€” same readability treatment (layout unchanged) */
 .atlas-features .atlas-why__header {
   position: relative;
   isolation: isolate;
@@ -4230,7 +4158,7 @@ button.atlas-logo-header-btn:focus-visible {
   line-height: 1.65;
 }
 
-/* ── Final CTA ── */
+/* â”€â”€ Final CTA â”€â”€ */
 .atlas-final-cta {
   padding-block: clamp(5rem, 12vh, 9rem);
   border-top: 1px solid rgba(255, 255, 255, 0.05);
@@ -4242,7 +4170,7 @@ button.atlas-logo-header-btn:focus-visible {
   margin-inline: auto;
 }
 
-/* Final CTA block over globe — same readability treatment (layout unchanged) */
+/* Final CTA block over globe â€” same readability treatment (layout unchanged) */
 .atlas-final-cta .atlas-final-cta__inner {
   position: relative;
   isolation: isolate;
@@ -4283,7 +4211,7 @@ button.atlas-logo-header-btn:focus-visible {
     0 0 80px rgba(59, 130, 246, 0.12);
 }
 
-/* ── Footer ── */
+/* â”€â”€ Footer â”€â”€ */
 .atlas-footer {
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   padding-top: clamp(2.5rem, 5vh, 4rem);
@@ -4530,7 +4458,7 @@ button.atlas-logo-header-btn:focus-visible {
   font-size: 13px;
 }
 
-/* Header CTA — compact pill like reference “Try Free”, no surrounding bar */
+/* Header CTA â€” compact pill like reference â€œTry Freeâ€, no surrounding bar */
 .stitch-btn-primary--nav {
   padding: 10px 22px;
   font-size: 13px;
@@ -4752,7 +4680,7 @@ button.atlas-logo-header-btn:focus-visible {
   color: rgba(148, 163, 184, 0.55);
 }
 
-/* Landing page — globe.gl hero (same chrome as stitch globe, WebGL inside sphere) */
+/* Landing page â€” globe.gl hero (same chrome as stitch globe, WebGL inside sphere) */
 .stitch-globe-sphere.landing-globe-demo__sphere {
   overflow: hidden;
 }
@@ -4789,7 +4717,7 @@ button.atlas-logo-header-btn:focus-visible {
   background: #020408;
 }
 
-/* Map3D landing — same stage nudge as globe.gl immersive: sphere fills upper fold (see LandingGlobeDemo) */
+/* Map3D landing â€” same stage nudge as globe.gl immersive: sphere fills upper fold (see LandingGlobeDemo) */
 .landing-google-globe--elevated .landing-globe-demo--immersive__host {
   top: clamp(-15vh, -11vw, -5.5rem);
   bottom: auto;
@@ -4810,7 +4738,7 @@ button.atlas-logo-header-btn:focus-visible {
   z-index: 60;
 }
 
-/* Map3D landing: marker-anchored popover (LandingGoogleGlobe) — width matches former bottom sheet */
+/* Map3D landing: marker-anchored popover (LandingGoogleGlobe) â€” width matches former bottom sheet */
 .landing-google-globe__popover {
   max-width: min(100vw - 1.5rem, 300px);
 }
@@ -4927,7 +4855,7 @@ button.atlas-logo-header-btn:focus-visible {
   }
 }
 
-/* Feature row — scroll-in stagger via IO (.stitch-features-row--in-view) */
+/* Feature row â€” scroll-in stagger via IO (.stitch-features-row--in-view) */
 .stitch-feature-card {
   padding: 1.35rem 1.5rem;
   border-radius: 1.25rem;
@@ -5230,7 +5158,7 @@ button.atlas-logo-header-btn:focus-visible {
   }
 }
 
-/* ── News Sidebar ── */
+/* â”€â”€ News Sidebar â”€â”€ */
 .news-sidebar {
   position: absolute;
   top: 56px; /* below header */
@@ -5513,4 +5441,67 @@ button.atlas-logo-header-btn:focus-visible {
 .atlas-globe-event-pulse {
   animation: atlas-globe-event-pulse-kf 1.2s ease-in-out infinite;
   transform-origin: center center;
+}
+
+/* Phase 1 â€” Tactical shader mode (desaturate + grain + green tint) */
+.atlas-tactical-mode {
+  filter: saturate(0.45) contrast(1.08) brightness(0.92) sepia(0.12) hue-rotate(48deg);
+}
+
+.atlas-tactical-mode::after {
+  content: '';
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  opacity: 0.07;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  mix-blend-mode: overlay;
+}
+
+/* Phase 5 â€” watchlist / share toasts */
+.atlas-toast-host {
+  position: fixed;
+  bottom: 72px;
+  right: 12px;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(360px, calc(100vw - 24px));
+  pointer-events: none;
+}
+
+.atlas-toast {
+  pointer-events: auto;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(8, 12, 24, 0.94);
+  backdrop-filter: blur(12px);
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: var(--font-data);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.atlas-toast:hover {
+  border-color: rgba(26, 144, 255, 0.35);
+  background: rgba(12, 18, 32, 0.98);
+}
+
+.atlas-toast-label {
+  display: block;
+  font-size: 8px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: rgba(26, 144, 255, 0.75);
+  margin-bottom: 4px;
+}
+
+.atlas-toast-body {
+  display: block;
+  font-size: 10px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.82);
 }

@@ -39,11 +39,19 @@ export function initEventBus() {
     new URL('../workers/eventBus.worker.js', import.meta.url),
     { type: 'module' }
   )
+  eventBusWorker.onerror = (err) => {
+    // eslint-disable-next-line no-console
+    console.error('[eventBus] worker failed to load or crashed:', err.message || err)
+  }
 
   fetchWorker = new Worker(
     new URL('../workers/fetchManager.worker.js', import.meta.url),
     { type: 'module' }
   )
+  fetchWorker.onerror = (err) => {
+    // eslint-disable-next-line no-console
+    console.error('[fetchManager] worker failed to load or crashed:', err.message || err)
+  }
 
   eventBusWorker.onmessage = (msg) => {
     const { type } = msg.data
@@ -81,6 +89,7 @@ export function initEventBus() {
         lastFetch: msg.data.lastFetch,
         eventCount: msg.data.eventCount,
         warning: msg.data.warning,
+        error: msg.data.error,
       }
       if (DEV_BREADCRUMBS) {
         // eslint-disable-next-line no-console

@@ -4,44 +4,14 @@ import { CATEGORY_KEYS } from '../utils/categoryColors'
 import { loadQualitySettings, saveQualitySettings, loadGlobeMode, saveGlobeMode, QUALITY_TIERS } from '../config/qualityTiers'
 import { initEventBus, startFetching, stopFetching, subscribeToBatchUpdates, subscribeToSourceStatus, destroyEventBus } from '../core/eventBus'
 import { supabase } from '../services/supabase'
-import { loadPersistedBgmTrackId, persistBgmTrackId, BGM_AMBIENT_TRACKS } from '../config/bgmTracks'
-import {
-  loadPersistedBgmProvider,
-  persistBgmProvider,
-  loadPersistedSpotifyContextUri,
-  persistSpotifyContextUri,
-  loadPersistedBgmYoutube,
-  persistBgmYoutube,
-} from '../config/bgmMusicState'
-import { loadSpotifyAuthFromStorage, persistSpotifyAuth } from '../music/spotifyTokens'
-
 const STORAGE_KEY_SOURCES = 'atlas_selected_sources'
 const STORAGE_KEY_ONBOARDED = 'atlas_onboarded'
-const STORAGE_KEY_BGM_VOL = 'atlas_bgm_volume'
 const STORAGE_KEY_DATA_LAYERS = 'atlas_data_layers'
+const STORAGE_KEY_TACTICAL_MODE = 'atlas_tactical_mode'
+const STORAGE_KEY_DETECTION_MODE = 'atlas_detection_mode'
+const STORAGE_KEY_DETECTION_LABELS = 'atlas_detection_labels'
 /** Legacy key — cleared on reopen so returning users see the landing page first again */
 const STORAGE_KEY_LANDING = 'atlas_landing_ack_v1'
-
-function loadPersistedBgmVolume() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY_BGM_VOL)
-    if (raw != null) {
-      const n = parseFloat(raw)
-      if (!Number.isNaN(n)) return Math.max(0, Math.min(1, n))
-    }
-  } catch {
-    /* ignore */
-  }
-  return 0.65
-}
-
-function persistBgmVolume(v) {
-  try {
-    localStorage.setItem(STORAGE_KEY_BGM_VOL, String(v))
-  } catch {
-    /* ignore */
-  }
-}
 
 const DEFAULT_DATA_LAYERS = {
   gdelt: true,           // Geopolitical events from GDELT 2.0
@@ -55,13 +25,34 @@ const DEFAULT_DATA_LAYERS = {
   // there's no live event there. Users can re-enable from the data-layers HUD.
   gdeltHeatmap: false,
   gdeltChoropleth: false,// GDELT GEO per-country tone choropleth
+  gibsTrueColor: false,  // NASA GIBS MODIS true-color WMTS (2D Map + Globe.GL)
+  // Phase 2 — GIBS imagery overlays (mutually exclusive on Globe.GL; stackable on 2D Map)
+  gibsFires: false,      // MODIS 7-2-1 fire-sensitive false color
+  gibsAerosol: false,    // MODIS Terra aerosol
+  gibsDust: false,       // AIRS L2 dust score (day)
+  gibsClouds: false,     // MODIS Aqua cloud fraction (day)
+  gibsBlackMarble: false,// Enhance night-side city lights (Globe.GL)
+  terminator: true,      // Day/night terminator line
+  // Phase 1 — live tactical layers ($0 sources)
+  adsb: true,            // OpenSky ADS-B aircraft (default ON per build plan)
+  adsbMilitary: true,    // Military ICAO hex sub-filter (distinct sprite)
+  satellites: false,     // CelesTrak TLE-propagated satellites
+  // Phase 3 — maritime & storms ($0 sources, default OFF per build plan)
+  ais: false,            // AISStream.io vessels at chokepoints (requires AISSTREAM_API_KEY server-side)
+  nhcStorms: false,      // NOAA NHC active cyclone tracks + cone-of-error
+  windOverlay: false,    // Open-Meteo wind particles (Globe.GL only)
+  // Phase 6 — stretch signals ($0 sources, default OFF per build plan)
+  bluesky: false,        // Bluesky Jetstream social reach — $0, no key
+  factCheck: false,      // Google Fact Check Tools — $0 with GOOGLE_FACT_CHECK_API_KEY server-side
 }
 
 /**
  * One-time migration key: bumped whenever a data-layer default flips from ON
  * to OFF so existing users stop seeing the old layer after pull/reload.
  */
-const DATA_LAYERS_MIGRATION_KEY = 'atlas_data_layers_migration_v2'
+const DATA_LAYERS_MIGRATION_KEY = 'atlas_data_layers_migration'
+const DATA_LAYERS_MIGRATION_VERSION = 'v4'
+const GIBS_IMAGERY_EXCLUSIVE_KEYS = ['gibsTrueColor', 'gibsFires', 'gibsAerosol', 'gibsDust', 'gibsClouds']
 
 function loadDataLayers() {
   try {
@@ -73,10 +64,11 @@ function loadDataLayers() {
         // v2: GDELT heatmap default flipped to off. Force any stale `true`
         // from a previous session back to the new default so faded heatmap
         // blobs don't keep rendering for returning users.
-        if (!localStorage.getItem(DATA_LAYERS_MIGRATION_KEY)) {
+        if (localStorage.getItem(DATA_LAYERS_MIGRATION_KEY) !== DATA_LAYERS_MIGRATION_VERSION) {
           if (rest.gdeltHeatmap === true) rest.gdeltHeatmap = false
+          if (rest.terminator === undefined) rest.terminator = true
           try {
-            localStorage.setItem(DATA_LAYERS_MIGRATION_KEY, '1')
+            localStorage.setItem(DATA_LAYERS_MIGRATION_KEY, DATA_LAYERS_MIGRATION_VERSION)
             localStorage.setItem(
               STORAGE_KEY_DATA_LAYERS,
               JSON.stringify({ ...DEFAULT_DATA_LAYERS, ...rest }),
@@ -87,13 +79,28 @@ function loadDataLayers() {
       }
     }
   } catch { /* ignore */ }
-  try { localStorage.setItem(DATA_LAYERS_MIGRATION_KEY, '1') } catch { /* ignore */ }
+  try { localStorage.setItem(DATA_LAYERS_MIGRATION_KEY, DATA_LAYERS_MIGRATION_VERSION) } catch { /* ignore */ }
   return { ...DEFAULT_DATA_LAYERS }
 }
 
 function persistDataLayers(layers) {
   try {
     localStorage.setItem(STORAGE_KEY_DATA_LAYERS, JSON.stringify(layers))
+  } catch { /* ignore */ }
+}
+
+function loadBoolPref(key, fallback = false) {
+  try {
+    const v = localStorage.getItem(key)
+    if (v === 'true') return true
+    if (v === 'false') return false
+  } catch { /* ignore */ }
+  return fallback
+}
+
+function persistBoolPref(key, value) {
+  try {
+    localStorage.setItem(key, String(value))
   } catch { /* ignore */ }
 }
 
@@ -137,7 +144,8 @@ function loadActiveDimensions() {
   try {
     const params = new URLSearchParams(window.location.search)
     if (params.has('dim')) {
-      return new Set(params.get('dim').split(',').filter(d => DEFAULT_DIMENSIONS.includes(d)))
+      const parsed = params.get('dim').split(',').filter(d => DEFAULT_DIMENSIONS.includes(d))
+      if (parsed.length > 0) return new Set(parsed)
     }
     const legacy = localStorage.getItem('atlas_active_dimensions')
     if (legacy) {
@@ -196,24 +204,6 @@ export const useAtlasStore = create((set, get) => ({
   /** { videoId, title, url, isLive } | null — when set, YouTube embed overlay is shown */
   youtubeEmbed: null,
 
-  /** Background music: ambient loop track id (see `config/bgmTracks.js`) */
-  bgmAmbientTrackId: loadPersistedBgmTrackId(),
-  /** `atlas` | `spotify` | `youtube` | `apple_music` */
-  bgmProvider: loadPersistedBgmProvider(),
-  /** After intro.mp3 ends — external providers wait for this before starting */
-  bgmIntroComplete: false,
-  /** Spotify OAuth tokens (see `music/spotifyTokens.js`) */
-  spotifyAuth: loadSpotifyAuthFromStorage(),
-  /** e.g. spotify:playlist:abc — used with Web Playback SDK */
-  spotifyPlayContextUri: loadPersistedSpotifyContextUri(),
-  /** YouTube / YouTube Music background: video or playlist */
-  bgmYoutube: loadPersistedBgmYoutube(),
-  /** Last Spotify / YouTube error for the ambient menu */
-  bgmExternalMessage: null,
-  /** `{ x, y }` client coords — null when the track picker is closed */
-  bgmTrackMenu: null,
-  /** Background music output level 0–1 (intro + ambient), persisted */
-  bgmVolume: loadPersistedBgmVolume(),
   manualRefreshUsedToday: false,
   triggerManualRefresh: null,
   launchTransitionActive: false,
@@ -228,6 +218,13 @@ export const useAtlasStore = create((set, get) => ({
   gdeltAnalytics: null,
   sourceStatuses: {},
   eventBusReady: false,
+  /** GDELT GEO overlay bootstrap — heatmap / choropleth mesh readiness */
+  gdeltGeoBootstrap: {
+    loading: false,
+    heatmapReady: false,
+    choroplethReady: false,
+    error: null,
+  },
   priorityFilter: filters.priority,
   timeFilter: filters.time,
   activeDimensions: loadActiveDimensions(),
@@ -240,10 +237,28 @@ export const useAtlasStore = create((set, get) => ({
   // ── Data Layers (globe visualization toggles) ──
   dataLayers: loadDataLayers(),
 
+  // ── Phase 1 — tactical visual modes ──
+  /** Desaturate + grain + green tint on globe canvas */
+  tacticalMode: loadBoolPref(STORAGE_KEY_TACTICAL_MODE, false),
+  /** Reticle rings + target ID labels on markers */
+  detectionMode: loadBoolPref(STORAGE_KEY_DETECTION_MODE, false),
+  /** 'sparse' | 'dense' — detection label density */
+  detectionLabelDensity: localStorage.getItem(STORAGE_KEY_DETECTION_LABELS) || 'sparse',
+
   // ── Auth / User ──
   user: null,
   /** 'auth' | 'sources' — tracks which sub-step of onboarding the user is on */
   onboardingStep: 'auth',
+
+  // ── Phase 5 — shareable URL / watchlists / toasts ──
+  /** Camera snapshot encoded in share URLs */
+  shareCamera: null,
+  /** Event id from ?evt= applied once eventMap has the row */
+  pendingUrlEventId: null,
+  /** Supabase watchlist rows for signed-in users */
+  watchlists: [],
+  /** In-app toast queue (watchlist hits, share copy, etc.) */
+  toasts: [],
 
   // ── UI State ──
   settingsOpen: false,
@@ -368,59 +383,10 @@ export const useAtlasStore = create((set, get) => ({
     })),
   closeYouTubeEmbed: () => set({ youtubeEmbed: null }),
 
-  setBgmAmbientTrackId: (id) => {
-    if (!BGM_AMBIENT_TRACKS.some((t) => t.id === id)) return
-    persistBgmTrackId(id)
-    set({ bgmAmbientTrackId: id })
-  },
-
-  setBgmProvider: (provider) => {
-    const allowed = ['atlas', 'spotify', 'youtube', 'apple_music']
-    if (!allowed.includes(provider)) return
-    persistBgmProvider(provider)
-    set({ bgmProvider: provider, bgmExternalMessage: null })
-  },
-
-  setBgmIntroComplete: (v) => set({ bgmIntroComplete: !!v }),
-
-  setSpotifyAuth: (auth) => {
-    persistSpotifyAuth(auth)
-    set({ spotifyAuth: auth })
-  },
-
-  setSpotifyPlayContextUri: (uri) => {
-    persistSpotifyContextUri(uri)
-    set({ spotifyPlayContextUri: uri || '', bgmExternalMessage: null })
-  },
-
-  setBgmYoutube: (spec) => {
-    persistBgmYoutube(spec)
-    set({ bgmYoutube: spec, bgmExternalMessage: null })
-  },
-
-  setBgmExternalMessage: (msg) => set({ bgmExternalMessage: msg || null }),
-
-  disconnectSpotifySession: () => {
-    persistSpotifyAuth(null)
-    persistSpotifyContextUri('')
-    set({
-      spotifyAuth: null,
-      spotifyPlayContextUri: '',
-      bgmProvider: 'atlas',
-      bgmExternalMessage: null,
-    })
-  },
-
-  openBgmTrackMenu: (x, y) => set({ bgmTrackMenu: { x, y } }),
-  closeBgmTrackMenu: () => set({ bgmTrackMenu: null }),
-
-  setBgmVolume: (v) => {
-    const n = typeof v === 'number' ? v : parseFloat(v)
-    if (Number.isNaN(n)) return
-    const clamped = Math.max(0, Math.min(1, n))
-    persistBgmVolume(clamped)
-    set({ bgmVolume: clamped })
-  },
+  /** Phase 6 — on-demand Sentinel-2 scene overlay (Copernicus STAC, $0) */
+  sentinel2Scene: null,
+  setSentinel2Scene: (scene) => set({ sentinel2Scene: scene }),
+  clearSentinel2Scene: () => set({ sentinel2Scene: null }),
 
   // ── Quality & Globe Mode Setters ──
   setGlobeMode: (mode) => {
@@ -456,6 +422,24 @@ export const useAtlasStore = create((set, get) => ({
 
   toggleSettings: () => set((s) => ({ settingsOpen: !s.settingsOpen })),
   setSettingsOpen: (v) => set({ settingsOpen: v }),
+
+  setShareCamera: (camera) => set({ shareCamera: camera }),
+  setPendingUrlEventId: (id) => set({ pendingUrlEventId: id }),
+  setWatchlists: (items) => set({ watchlists: items || [] }),
+
+  pushToast: ({ label, message, onClick, durationMs }) => set((s) => ({
+    toasts: [
+      ...s.toasts,
+      {
+        id: crypto.randomUUID(),
+        label: label || 'ATLAS',
+        message: message || '',
+        onClick,
+        durationMs,
+      },
+    ].slice(-5),
+  })),
+  dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 
   getEffectiveSetting: (key) => {
     const state = get()
@@ -603,6 +587,11 @@ export const useAtlasStore = create((set, get) => ({
   toggleDataLayer: (layerId) => {
     const current = get().dataLayers
     const next = { ...current, [layerId]: !current[layerId] }
+    if (GIBS_IMAGERY_EXCLUSIVE_KEYS.includes(layerId) && next[layerId]) {
+      for (const k of GIBS_IMAGERY_EXCLUSIVE_KEYS) {
+        if (k !== layerId) next[k] = false
+      }
+    }
     persistDataLayers(next)
     set({ dataLayers: next })
   },
@@ -611,6 +600,29 @@ export const useAtlasStore = create((set, get) => ({
     const next = { ...current, [layerId]: enabled }
     persistDataLayers(next)
     set({ dataLayers: next })
+  },
+
+  setGdeltGeoBootstrap: (partial) =>
+    set((s) => ({
+      gdeltGeoBootstrap: { ...s.gdeltGeoBootstrap, ...partial },
+    })),
+
+  toggleTacticalMode: () => set((s) => {
+    const next = !s.tacticalMode
+    persistBoolPref(STORAGE_KEY_TACTICAL_MODE, next)
+    return { tacticalMode: next }
+  }),
+
+  toggleDetectionMode: () => set((s) => {
+    const next = !s.detectionMode
+    persistBoolPref(STORAGE_KEY_DETECTION_MODE, next)
+    return { detectionMode: next }
+  }),
+
+  setDetectionLabelDensity: (density) => {
+    const mode = density === 'dense' ? 'dense' : 'sparse'
+    try { localStorage.setItem(STORAGE_KEY_DETECTION_LABELS, mode) } catch { /* ignore */ }
+    set({ detectionLabelDensity: mode })
   },
 
   // ── Auth Actions ──

@@ -1,7 +1,5 @@
-# Background audio
+# Background audio (legacy)
 
-Place MP3s here. Registered in `src/config/bgmTracks.js`.
+The BGM / Spotify audio system was removed in Phase 0 — music does not serve information density on the intel dashboard.
 
-- **`time-hans-zimmer.mp3`** — “Time” (Hans Zimmer). Use this URL-safe filename so the browser can load it reliably (avoid `#`, spaces, and long names in the URL). You can duplicate your file from iTunes/library into this name.
-
-Also in this folder: `intro.mp3`, `space-ambient.mp3`, and optionally the original long-named Inception file (not referenced by the app).
+This folder may still contain unused MP3 assets from earlier builds. They are not referenced by the app.

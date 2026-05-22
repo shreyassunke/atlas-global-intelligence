@@ -15,10 +15,10 @@ const PRIORITY_OPTIONS = [
 ]
 
 const TIME_OPTIONS = [
-  { value: 'live', label: 'Live' },
-  { value: '24h', label: '24h' },
-  { value: '7d', label: '7d' },
-  { value: '30d', label: '30d' },
+  { value: 'live', label: 'Live', title: 'Last 2 hours of geocoded signals' },
+  { value: '24h', label: '24h', title: 'Events from the past 24 hours' },
+  { value: '7d', label: '7d', title: 'Events from the past 7 days' },
+  { value: '30d', label: '30d', title: 'Events from the past 30 days' },
 ]
 
 export default function DimensionFilters() {
@@ -127,6 +127,7 @@ export default function DimensionFilters() {
                 className={`settings-toggle-btn ${timeFilter === opt.value ? 'active' : ''}`}
                 style={{ flex: 1, padding: '4px', fontSize: '10px', minHeight: 32 }}
                 onClick={() => setTimeFilter(opt.value)}
+                title={opt.title}
               >
                 {opt.label}
               </button>
@@ -233,6 +234,7 @@ export default function DimensionFilters() {
             className={`settings-toggle-btn ${timeFilter === opt.value ? 'active' : ''}`}
             style={{ flex: 1, padding: '4px', fontSize: '10px' }}
             onClick={() => setTimeFilter(opt.value)}
+            title={opt.title}
           >
             {opt.label}
           </button>

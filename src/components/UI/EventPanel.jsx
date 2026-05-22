@@ -5,7 +5,10 @@ import {
   PRIORITIES, PRIORITY_LABELS, formatToneScore
 } from '../../core/eventSchema'
 import CausalThread from './CausalThread'
+import EventTimeline from './EventTimeline'
+import StretchSignalsPanel from './StretchSignalsPanel'
 import { buildGdeltDocQuery } from '../../services/gdelt/analyticsService'
+import { classifySatellitePurpose, SATELLITE_PURPOSE_META } from '../../core/satellitePurpose'
 
 const IconStreetView = () => (
   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -99,6 +102,15 @@ export default function EventPanel() {
                 <span className="event-meta-label">Sources</span>
                 <span className="event-meta-value">
                   {selectedEvent.corroborationCount} source{selectedEvent.corroborationCount !== 1 ? 's' : ''}
+                  {(selectedEvent.corroborationScore ?? 0) > 0 && (
+                    <span
+                      className="source-badge-auth"
+                      style={{ marginLeft: 6 }}
+                      title={`Corroboration score ${Math.round((selectedEvent.corroborationScore ?? 0) * 100)}% — distinct feeds, module diversity, time spread`}
+                    >
+                      {Math.round((selectedEvent.corroborationScore ?? 0) * 100)}%
+                    </span>
+                  )}
                   {selectedEvent.authoritative && (
                     <span className="source-badge-auth" style={{ marginLeft: 6 }}>AUTH</span>
                   )}
@@ -145,6 +157,162 @@ export default function EventPanel() {
               <p className="event-detail-text">{selectedEvent.detail}</p>
             )}
 
+            {selectedEvent.trackKind === 'aircraft' && (
+              <div className="event-meta-grid" style={{ marginTop: 8 }}>
+                {selectedEvent.callsign && (
+                  <div className="event-meta-item">
+                    <span className="event-meta-label">Callsign</span>
+                    <span className="event-meta-value">{selectedEvent.callsign.trim()}</span>
+                  </div>
+                )}
+                {selectedEvent.icao24 && (
+                  <div className="event-meta-item">
+                    <span className="event-meta-label">ICAO24</span>
+                    <span className="event-meta-value">{selectedEvent.icao24.toUpperCase()}</span>
+                  </div>
+                )}
+                {selectedEvent.altitudeM != null && (
+                  <div className="event-meta-item">
+                    <span className="event-meta-label">Altitude</span>
+                    <span className="event-meta-value">{Math.round(selectedEvent.altitudeM * 3.281).toLocaleString()} ft</span>
+                  </div>
+                )}
+                {selectedEvent.velocityMs != null && (
+                  <div className="event-meta-item">
+                    <span className="event-meta-label">Speed</span>
+                    <span className="event-meta-value">{Math.round(selectedEvent.velocityMs * 1.944)} kts</span>
+                  </div>
+                )}
+                {selectedEvent.originCountry && (
+                  <div className="event-meta-item">
+                    <span className="event-meta-label">Origin</span>
+                    <span className="event-meta-value">{selectedEvent.originCountry}</span>
+                  </div>
+                )}
+                {selectedEvent.isMilitary && (
+                  <div className="event-meta-item" style={{ gridColumn: '1 / -1' }}>
+                    <span className="event-meta-label">Classification</span>
+                    <span className="event-meta-value" style={{ color: '#ff6b35' }}>Military (ICAO heuristic)</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {selectedEvent.trackKind === 'satellite' && selectedEvent.noradId != null && (() => {
+              const purpose = selectedEvent.satellitePurpose
+                ? {
+                    purpose: selectedEvent.satellitePurpose,
+                    label: selectedEvent.satellitePurposeLabel,
+                    detail: selectedEvent.satellitePurposeDetail,
+                    operator: selectedEvent.satelliteOperator,
+                    icon: SATELLITE_PURPOSE_META[selectedEvent.satellitePurpose]?.icon || '🛰',
+                  }
+                : classifySatellitePurpose({
+                    name: selectedEvent.title,
+                    satelliteGroup: selectedEvent.satelliteGroup,
+                    isMilitary: selectedEvent.isMilitary,
+                  })
+              return (
+              <div className="event-meta-grid" style={{ marginTop: 8 }}>
+                <div className="event-meta-item" style={{ gridColumn: '1 / -1' }}>
+                  <span className="event-meta-label">Mission Purpose</span>
+                  <span className="event-meta-value" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span aria-hidden>{purpose.icon}</span>
+                    {purpose.label || selectedEvent.satellitePurposeLabel || 'Unknown'}
+                  </span>
+                </div>
+                {purpose.detail && (
+                  <div className="event-meta-item" style={{ gridColumn: '1 / -1' }}>
+                    <span className="event-meta-label">Why It&apos;s There</span>
+                    <span className="event-meta-value" style={{ fontSize: '11px', lineHeight: 1.45, opacity: 0.9 }}>
+                      {purpose.detail}
+                    </span>
+                  </div>
+                )}
+                {(purpose.operator || selectedEvent.satelliteOperator) && (
+                  <div className="event-meta-item">
+                    <span className="event-meta-label">Operator</span>
+                    <span className="event-meta-value">{purpose.operator || selectedEvent.satelliteOperator}</span>
+                  </div>
+                )}
+                <div className="event-meta-item">
+                  <span className="event-meta-label">NORAD ID</span>
+                  <span className="event-meta-value">{selectedEvent.noradId}</span>
+                </div>
+                {selectedEvent.satelliteGroup && (
+                  <div className="event-meta-item">
+                    <span className="event-meta-label">Catalog</span>
+                    <span className="event-meta-value">{selectedEvent.satelliteGroup}</span>
+                  </div>
+                )}
+                {selectedEvent.altitudeM != null && (
+                  <div className="event-meta-item">
+                    <span className="event-meta-label">Altitude</span>
+                    <span className="event-meta-value">{Math.round(selectedEvent.altitudeM / 1000).toLocaleString()} km</span>
+                  </div>
+                )}
+              </div>
+              )
+            })()}
+
+            {selectedEvent.trackKind === 'vessel' && (
+              <div className="event-meta-grid" style={{ marginTop: 8 }}>
+                {selectedEvent.shipName && (
+                  <div className="event-meta-item">
+                    <span className="event-meta-label">Vessel</span>
+                    <span className="event-meta-value">{selectedEvent.shipName}</span>
+                  </div>
+                )}
+                {selectedEvent.mmsi && (
+                  <div className="event-meta-item">
+                    <span className="event-meta-label">MMSI</span>
+                    <span className="event-meta-value">{selectedEvent.mmsi}</span>
+                  </div>
+                )}
+                {selectedEvent.sog != null && (
+                  <div className="event-meta-item">
+                    <span className="event-meta-label">Speed</span>
+                    <span className="event-meta-value">{selectedEvent.sog.toFixed(1)} kn</span>
+                  </div>
+                )}
+                {selectedEvent.cog != null && (
+                  <div className="event-meta-item">
+                    <span className="event-meta-label">Course</span>
+                    <span className="event-meta-value">{selectedEvent.cog}°</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {selectedEvent.trackKind === 'storm' && (
+              <div className="event-meta-grid" style={{ marginTop: 8 }}>
+                {selectedEvent.stormId && (
+                  <div className="event-meta-item">
+                    <span className="event-meta-label">Storm ID</span>
+                    <span className="event-meta-value">{selectedEvent.stormId}</span>
+                  </div>
+                )}
+                {selectedEvent.stormCategory && (
+                  <div className="event-meta-item">
+                    <span className="event-meta-label">Category</span>
+                    <span className="event-meta-value">{selectedEvent.stormCategory}</span>
+                  </div>
+                )}
+                {selectedEvent.trackCoords?.length > 0 && (
+                  <div className="event-meta-item">
+                    <span className="event-meta-label">Forecast track</span>
+                    <span className="event-meta-value">{selectedEvent.trackCoords.length} points</span>
+                  </div>
+                )}
+                {selectedEvent.coneCoords?.length > 0 && (
+                  <div className="event-meta-item">
+                    <span className="event-meta-label">Cone of uncertainty</span>
+                    <span className="event-meta-value">Available</span>
+                  </div>
+                )}
+              </div>
+            )}
+
             {selectedEvent.disputed && (
               <div style={{
                 padding: '8px 10px',
@@ -156,11 +324,47 @@ export default function EventPanel() {
                 letterSpacing: '0.15em',
                 color: 'var(--priority-p2)',
               }}>
-                ⚠ Sources disagree on severity
+                ⚠{' '}
+                {selectedEvent.toneDisagreement
+                  ? `Sources disagree on coverage tone (spread ${selectedEvent.toneDisagreement.spread.toFixed(1)})`
+                  : 'Sources disagree on severity'}
               </div>
             )}
 
-            {selectedEvent.tags.length > 0 && (
+            {Array.isArray(selectedEvent.sourceReports) && selectedEvent.sourceReports.length > 1 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <span className="event-meta-label">Per-source tone</span>
+                {selectedEvent.sourceReports.slice(0, 6).map((report) => {
+                  const tone = report.toneScore != null ? formatToneScore(report.toneScore) : null
+                  return (
+                    <div
+                      key={`${report.eventId}-${report.sourceId}`}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        gap: 8,
+                        fontFamily: 'var(--font-data)',
+                        fontSize: '10px',
+                        color: 'var(--text-muted)',
+                      }}
+                    >
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {report.source || report.sourceId}
+                      </span>
+                      {tone ? (
+                        <span className={`tone-indicator tone-${tone.sentiment}`}>
+                          {tone.label} ({tone.score})
+                        </span>
+                      ) : (
+                        <span>—</span>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {selectedEvent.tags?.length > 0 && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                 {selectedEvent.tags.slice(0, 6).map((tag) => (
                   <span key={tag} style={{
@@ -179,11 +383,17 @@ export default function EventPanel() {
               </div>
             )}
 
+            {/* Story thread — same incident across days */}
+            <EventTimeline event={selectedEvent} />
+
             {/* Causal thread — Related Signals section */}
             <CausalThread event={selectedEvent} />
 
+            {/* Phase 6 — Bluesky social reach, fact checks, Sentinel-2 on-demand */}
+            <StretchSignalsPanel event={selectedEvent} />
+
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {Array.isArray(selectedEvent.corroborationSources) && (
+              {Array.isArray(selectedEvent.corroborationSources) && !selectedEvent.trackKind && (
                 <button
                   type="button"
                   className="event-source-link"

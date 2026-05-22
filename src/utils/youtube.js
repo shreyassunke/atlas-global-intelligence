@@ -86,20 +86,6 @@ export function extractYouTubePlaylistId(input) {
 }
 
 /**
- * @returns {{ type: 'video', id: string } | { type: 'playlist', id: string } | null}
- */
-export function resolveYoutubeBgmFromInput(input) {
-  if (!input || typeof input !== 'string') return null
-  const s = input.trim()
-  const pl = extractYouTubePlaylistId(s)
-  if (pl) return { type: 'playlist', id: pl }
-  const vid = extractYouTubeVideoId(s)
-  if (vid) return { type: 'video', id: vid }
-  if (/^[\w-]{11}$/.test(s)) return { type: 'video', id: s }
-  return null
-}
-
-/**
  * Embed URL tuned for low-latency playback and minimal UI chrome.
  * - youtube-nocookie.com: privacy-enhanced embed (fewer tracking cookies)
  * - enablejsapi=1: allows postMessage control in future

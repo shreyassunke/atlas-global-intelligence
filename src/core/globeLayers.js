@@ -16,14 +16,6 @@ export const NUCLEAR_FACILITIES = [
   { name: 'Taishan', lat: 21.92, lng: 112.98, country: 'CN' },
 ]
 
-export const SUBMARINE_CABLE_PATHS = [
-  { name: 'Transatlantic', points: [[-73.9, 40.7], [-5.5, 50.1]] },
-  { name: 'Trans-Pacific N', points: [[-122.4, 37.8], [139.7, 35.7]] },
-  { name: 'Trans-Pacific S', points: [[-118.2, 34.0], [151.2, -33.9]] },
-  { name: 'Europe-Asia', points: [[-5.5, 36.0], [32.3, 30.0], [43.3, 12.6], [56.3, 26.6], [72.8, 21.0], [80.2, 13.1], [101.8, 2.5], [103.8, 1.3]] },
-  { name: 'US-SA', points: [[-73.9, 40.7], [-43.2, -22.9]] },
-  { name: 'Africa-India', points: [[-18.5, 14.7], [39.3, -6.8], [72.8, 19.1]] },
-]
 
 export const ARC_TYPES = {
   CORRELATION: 'correlation',
@@ -37,17 +29,61 @@ export const GLOBE_OVERLAY_LAYER_KEYS = {
   GDELT_CHOROPLETH: 'gdeltChoropleth',
 }
 
+/** NASA GIBS WMTS imagery — free, no key. 2D Map + Globe.GL (Map3D has no WMTS hook). */
+export const GLOBE_DATA_LAYER_KEYS = {
+  GIBS_TRUE_COLOR: 'gibsTrueColor',
+  GIBS_FIRES: 'gibsFires',
+  GIBS_AEROSOL: 'gibsAerosol',
+  GIBS_DUST: 'gibsDust',
+  GIBS_CLOUDS: 'gibsClouds',
+  /** Night-side city-lights emphasis (Globe.GL night texture boost; optional GIBS when available) */
+  GIBS_BLACK_MARBLE: 'gibsBlackMarble',
+  /** Solar terminator line overlay (all globe modes) */
+  TERMINATOR: 'terminator',
+  /** OpenSky Network ADS-B live aircraft — $0, anon 10s / registered 5s poll */
+  ADSB: 'adsb',
+  /** Military-only sub-filter of ADS-B layer (ICAO hex range heuristic) */
+  ADSB_MILITARY: 'adsbMilitary',
+  /** CelesTrak TLE-propagated satellite positions — $0, no key */
+  SATELLITES: 'satellites',
+  /** AISStream.io vessel positions at maritime chokepoints — $0, registration only */
+  AIS: 'ais',
+  /** NOAA NHC active tropical cyclone tracks + cone — $0, no key */
+  NHC_STORMS: 'nhcStorms',
+  /** Open-Meteo wind particle overlay (Globe.GL) — $0, no key */
+  WIND_OVERLAY: 'windOverlay',
+  /** Bluesky Jetstream social signals — $0, no key */
+  BLUESKY: 'bluesky',
+  /** Google Fact Check Tools ClaimReview overlay — $0 with server API key */
+  FACT_CHECK: 'factCheck',
+}
+
 /**
  * Globe pins (Map3D / Globe.GL / FlatMap) are limited to GDELT and NASA natural / satellite
- * feeds (EONET, FIRMS). Commercial news API items use the dock feed only.
- * @returns {'gdelt'|'eonet'|'firms'|null}
+ * feeds (EONET, FIRMS), plus Phase 1 tactical layers (ADS-B, satellites).
+ * Commercial news API items use the dock feed only.
+ * @returns {'gdelt'|'eonet'|'firms'|'adsb'|'satellites'|null}
  */
 export function eventSourceToGlobeDataLayerKey(source) {
   const s = (source || '').toLowerCase()
   if (s.includes('gdelt')) return 'gdelt'
   if (s.includes('eonet')) return 'eonet'
   if (s.includes('firms')) return 'firms'
+  if (s.includes('usgs')) return 'usgs'
+  if (s.includes('gdacs')) return 'gdacs'
+  if (s.includes('opensky')) return 'adsb'
+  if (s.includes('celestrak tle') || s.includes('celestrak-tle')) return 'satellites'
+  if (s.includes('aisstream')) return 'ais'
+  if (s.includes('noaa nhc') || s.includes('noaa-nhc')) return 'nhcStorms'
+  if (s.includes('bluesky')) return 'bluesky'
+  if (s.includes('fact check') || s.includes('fact-check')) return 'factCheck'
   return null
+}
+
+/** @param {object} evt */
+export function isTacticalTrackEvent(evt) {
+  const kind = evt?.trackKind
+  return kind === 'aircraft' || kind === 'satellite' || kind === 'vessel'
 }
 
 /**
@@ -68,6 +104,34 @@ export function ringAroundLatLng(lat, lng, radiusDeg, steps = 14, altitudeM = 0)
 }
 
 export const ARC_LIMIT = 15
+
+/** GDELT AvgTone spread threshold for cluster-level disagreement highlighting. */
+export const CLUSTER_TONE_DISAGREEMENT_SPREAD = 4.0
+
+/**
+ * Flag spatial clusters where member tone scores diverge sharply (GDELT AvgTone).
+ * @param {{ events?: object[] }} cluster
+ */
+export function detectClusterToneDisagreement(cluster, threshold = CLUSTER_TONE_DISAGREEMENT_SPREAD) {
+  const events = cluster?.events || []
+  const tones = []
+  for (const e of events) {
+    if (e.toneScore != null && Number.isFinite(Number(e.toneScore))) {
+      tones.push(Number(e.toneScore))
+    }
+    for (const r of e.sourceReports || []) {
+      if (r.toneScore != null && Number.isFinite(Number(r.toneScore))) {
+        tones.push(Number(r.toneScore))
+      }
+    }
+  }
+  if (tones.length < 2) return null
+  const min = Math.min(...tones)
+  const max = Math.max(...tones)
+  const spread = max - min
+  if (spread < threshold) return null
+  return { min, max, spread, eventCount: events.length }
+}
 
 export function clusterEvents(events, radiusKm = 200, minClusterSize = 5) {
   const clusters = []

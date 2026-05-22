@@ -3,10 +3,11 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useAtlasStore } from '../../store/atlasStore'
 import SourceSearch from '../Onboarding/SourceSearch'
 import HeaderUserMenu from './HeaderUserMenu'
-import BgmTrackMenu from './BgmTrackMenu'
 import HeaderSearchBar from './HeaderSearchBar'
 import { AtlasWordmark } from './AtlasWordmark'
 import { MissionClock } from './ClockOverlay'
+import { copyShareUrl } from '../../core/urlState'
+import { buildBriefMarkdown, downloadMarkdownBrief, exportBriefPdf } from '../../core/briefExport'
 
 const IconFilter = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -81,14 +82,6 @@ const IconSetup = () => (
   </svg>
 )
 
-const IconAmbient = () => (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-    <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-    <path d="M18.07 5.93a9 9 0 0 1 0 12.14" />
-  </svg>
-)
-
 export default function Header({ hudHidden = false, onToggleHud, onToggleFilters, filtersOpen }) {
   const isLoading = useAtlasStore((s) => s.isLoading)
   const toggleSettings = useAtlasStore((s) => s.toggleSettings)
@@ -99,10 +92,49 @@ export default function Header({ hudHidden = false, onToggleHud, onToggleFilters
   const triggerManualRefresh = useAtlasStore((s) => s.triggerManualRefresh)
   const manualRefreshUsedToday = useAtlasStore((s) => s.manualRefreshUsedToday)
   const selectedSources = useAtlasStore((s) => s.selectedSources)
-  const openBgmTrackMenu = useAtlasStore((s) => s.openBgmTrackMenu)
   const mobileMode = useAtlasStore((s) => s.mobileMode)
   const [moreOpen, setMoreOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
+  const pushToast = useAtlasStore((s) => s.pushToast)
+
+  const handleCopyShareLink = async () => {
+    const state = useAtlasStore.getState()
+    const ok = await copyShareUrl({
+      activeDimensions: state.activeDimensions,
+      priorityFilter: state.priorityFilter,
+      timeFilter: state.timeFilter,
+      dataLayers: state.dataLayers,
+      globeMode: state.globeMode,
+      tacticalMode: state.tacticalMode,
+      detectionMode: state.detectionMode,
+      detectionLabelDensity: state.detectionLabelDensity,
+      shareCamera: state.shareCamera,
+      zoomLevel: state.zoomLevel,
+      selectedEventId: state.selectedEvent?.id ?? null,
+    })
+    pushToast({
+      label: 'Share',
+      message: ok ? 'Link copied to clipboard' : 'Could not copy link',
+    })
+    setMoreOpen(false)
+  }
+
+  const handleExportMarkdown = () => {
+    const md = buildBriefMarkdown(useAtlasStore.getState())
+    downloadMarkdownBrief(md)
+    pushToast({ label: 'Brief', message: 'Markdown brief downloaded' })
+    setMoreOpen(false)
+  }
+
+  const handleExportPdf = async () => {
+    try {
+      await exportBriefPdf(useAtlasStore.getState())
+      pushToast({ label: 'Brief', message: 'PDF brief saved' })
+    } catch {
+      pushToast({ label: 'Brief', message: 'PDF export failed — try Markdown' })
+    }
+    setMoreOpen(false)
+  }
   const moreRef = useRef(null)
   const searchRef = useRef(null)
 
@@ -126,7 +158,6 @@ export default function Header({ hudHidden = false, onToggleHud, onToggleFilters
 
   return (
     <>
-      <BgmTrackMenu />
       <motion.header
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -253,27 +284,34 @@ export default function Header({ hudHidden = false, onToggleHud, onToggleFilters
                   </button>
                   <button
                     className="hud-dropdown-item"
+                    onClick={handleCopyShareLink}
+                  >
+                    <IconSearch />
+                    <span>Copy Share Link</span>
+                  </button>
+                  <button
+                    className="hud-dropdown-item"
+                    onClick={handleExportMarkdown}
+                  >
+                    <IconSearch />
+                    <span>Export Brief (Markdown)</span>
+                  </button>
+                  <button
+                    className="hud-dropdown-item"
+                    onClick={handleExportPdf}
+                  >
+                    <IconSearch />
+                    <span>Export Brief (PDF)</span>
+                  </button>
+                  <div className="hud-dropdown-divider" />
+                  <button
+                    className="hud-dropdown-item"
                     onClick={() => { triggerManualRefresh?.(); setMoreOpen(false) }}
                     disabled={manualRefreshUsedToday || isLoading}
                   >
                     <IconRefresh />
                     <span>Refresh Data</span>
                   </button>
-                  <button
-                    type="button"
-                    className="hud-dropdown-item"
-                    onClick={(e) => {
-                      const r = e.currentTarget.getBoundingClientRect()
-                      openBgmTrackMenu(r.left + r.width / 2, r.bottom + 4)
-                      setMoreOpen(false)
-                    }}
-                  >
-                    <IconAmbient />
-                    <span>Ambient audio</span>
-                  </button>
-
-                  <div className="hud-dropdown-divider" />
-
                   <button
                     className="hud-dropdown-item"
                     onClick={() => { setSearchOpen(true); setMoreOpen(false) }}

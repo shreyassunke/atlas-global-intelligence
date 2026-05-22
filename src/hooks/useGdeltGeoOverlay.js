@@ -26,6 +26,7 @@ export default function useGdeltGeoOverlay() {
   const heatOn = dataLayers?.gdeltHeatmap !== false
   const choroOn = dataLayers?.gdeltChoropleth === true
   const anyOn = heatOn || choroOn
+  const setGdeltGeoBootstrap = useAtlasStore((s) => s.setGdeltGeoBootstrap)
 
   const [heatmapPoints, setHeatmapPoints] = useState([])
   const [choroplethRows, setChoroplethRows] = useState([])
@@ -52,7 +53,15 @@ export default function useGdeltGeoOverlay() {
   useEffect(() => {
     if (!heatOn) setHeatmapPoints([])
     if (!choroOn) setChoroplethRows([])
-  }, [heatOn, choroOn])
+    if (!anyOn) {
+      setGdeltGeoBootstrap({
+        loading: false,
+        heatmapReady: false,
+        choroplethReady: false,
+        error: null,
+      })
+    }
+  }, [heatOn, choroOn, anyOn, setGdeltGeoBootstrap])
 
   useEffect(() => {
     if (!anyOn) {
@@ -68,6 +77,7 @@ export default function useGdeltGeoOverlay() {
     async function run() {
       setLoading(true)
       setError(null)
+      setGdeltGeoBootstrap({ loading: true, error: null })
       try {
         const res = await fetchGdeltGeoOverlaySequential({
           query,
@@ -80,8 +90,23 @@ export default function useGdeltGeoOverlay() {
         if (heatOn) setHeatmapPoints(res.heatmapPoints)
         if (choroOn) setChoroplethRows(res.choroplethRows)
         if (res.errors.length) setError(res.errors.join(' · '))
+        setGdeltGeoBootstrap({
+          loading: false,
+          heatmapReady: !heatOn || res.heatmapPoints.length > 0,
+          choroplethReady: !choroOn || res.choroplethRows.length > 0,
+          error: res.errors.length ? res.errors.join(' · ') : null,
+        })
       } catch (e) {
-        if (!cancelled && mountedRef.current) setError(String(e?.message || e))
+        if (!cancelled && mountedRef.current) {
+          const msg = String(e?.message || e)
+          setError(msg)
+          setGdeltGeoBootstrap({
+            loading: false,
+            heatmapReady: !heatOn,
+            choroplethReady: !choroOn,
+            error: msg,
+          })
+        }
       } finally {
         if (!cancelled && mountedRef.current) setLoading(false)
       }
@@ -96,7 +121,7 @@ export default function useGdeltGeoOverlay() {
       controller.abort()
       clearInterval(timerRef.current)
     }
-  }, [anyOn, heatOn, choroOn, query, timespan])
+  }, [anyOn, heatOn, choroOn, query, timespan, setGdeltGeoBootstrap])
 
   const toneRange = useMemo(() => choroplethToneRange(choroplethRows), [choroplethRows])
 

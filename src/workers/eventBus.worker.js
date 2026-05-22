@@ -1,13 +1,12 @@
+import {
+  findCrossSourceDuplicate,
+  mergeCrossSource,
+  initializeCorroborationFields,
+} from '../core/crossSourceMerge.js'
+
 const RING_BUFFER_SIZE = 8000
 const BATCH_INTERVAL = 200
-const DEDUP_DISTANCE_KM = 50
-const DEDUP_TIME_MS = 3600_000
-const DEDUP_TITLE_THRESHOLD = 0.7
 const SEV5_IMMUNITY_MS = 86400_000
-
-const SHAPES = { latent: 'circle', active: 'diamond', critical: 'burst' }
-const DIMENSION_COLORS = { latent: '#1a90ff', active: '#ffaa00', critical: '#ff2222' }
-const CORROBORATION_OPACITY = { 1: 0.35, 2: 0.55, 3: 0.75, 4: 0.88, 5: 1.0 }
 
 let events = []
 let eventMap = new Map()
@@ -26,70 +25,6 @@ function haversineKm(lat1, lng1, lat2, lng2) {
   const dLng = toRad(lng2 - lng1)
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-}
-
-function titleSimilarity(a, b) {
-  if (!a || !b) return 0
-  const wordsA = new Set(a.toLowerCase().split(/\s+/))
-  const wordsB = new Set(b.toLowerCase().split(/\s+/))
-  let intersection = 0
-  for (const w of wordsA) if (wordsB.has(w)) intersection++
-  const union = new Set([...wordsA, ...wordsB]).size
-  return union === 0 ? 0 : intersection / union
-}
-
-// ══════════════════════════════════════════════════════════════
-//  DEDUP
-// ══════════════════════════════════════════════════════════════
-
-function findDuplicate(event) {
-  for (const existing of events) {
-    const timeDiff = Math.abs(new Date(event.timestamp).getTime() - new Date(existing.timestamp).getTime())
-    if (timeDiff > DEDUP_TIME_MS) continue
-    const dist = haversineKm(event.lat, event.lng, existing.lat, existing.lng)
-    if (dist > DEDUP_DISTANCE_KM) continue
-    if (titleSimilarity(event.title, existing.title) >= DEDUP_TITLE_THRESHOLD) {
-      return existing
-    }
-  }
-  return null
-}
-
-function mergeEvents(existing, incoming) {
-  const sources = new Set(existing.corroborationSources)
-  for (const s of incoming.corroborationSources) sources.add(s)
-  const corrobCount = Math.min(sources.size, 5)
-
-  existing.corroborationCount = corrobCount
-  existing.corroborationSources = [...sources]
-  existing.opacity = existing.authoritative && corrobCount === 1
-    ? Math.max(0.75, CORROBORATION_OPACITY[corrobCount] || 0.35)
-    : CORROBORATION_OPACITY[corrobCount] || 0.35
-
-  const severityGap = Math.abs(incoming.severity - existing.severity)
-  if (severityGap >= 2 && sources.size >= 2) {
-    existing.disputed = true
-    existing.severity = Math.min(existing.severity, incoming.severity)
-  } else if (incoming.severity > existing.severity) {
-    const oldPriority = existing.priority || existing.priority
-    existing.severity = incoming.severity
-    existing.priority = incoming.priority
-    existing.priority = incoming.priority || incoming.priority
-    existing.shape = SHAPES[incoming.priority] || existing.shape
-    existing.color = DIMENSION_COLORS[incoming.priority] || existing.color
-
-    if (oldPriority !== existing.priority) {
-      batchQueue.anomalies.push({
-        type: 'PRIORITY_UPGRADE',
-        eventId: existing.id,
-        from: oldPriority,
-        to: existing.priority,
-        timestamp: new Date().toISOString(),
-      })
-    }
-  }
-
-  return existing
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -332,11 +267,51 @@ function ingestEvents(incoming) {
   const newEvents = []
 
   for (const event of incoming) {
-    const existing = findDuplicate(event)
+    const byId = eventMap.get(event.id)
+    if (byId) {
+      const preserved = {
+        sourceReports: byId.sourceReports,
+        threadId: byId.threadId,
+        corroborationScore: byId.corroborationScore,
+        correlatedEventIds: byId.correlatedEventIds,
+        toneDisagreement: byId.toneDisagreement,
+      }
+      Object.assign(byId, event, {
+        fetchedAt: event.fetchedAt || new Date().toISOString(),
+      })
+      if (!event.sourceReports?.length && preserved.sourceReports?.length) {
+        byId.sourceReports = preserved.sourceReports
+      }
+      if (!event.threadId && preserved.threadId) byId.threadId = preserved.threadId
+      if ((event.corroborationScore ?? 0) === 0 && (preserved.corroborationScore ?? 0) > 0) {
+        byId.corroborationScore = preserved.corroborationScore
+      }
+      if (!event.correlatedEventIds?.length && preserved.correlatedEventIds?.length) {
+        byId.correlatedEventIds = preserved.correlatedEventIds
+      }
+      if (!event.toneDisagreement && preserved.toneDisagreement) {
+        byId.toneDisagreement = preserved.toneDisagreement
+      }
+      batchQueue.updated.push({ ...byId })
+      continue
+    }
+
+    const existing = findCrossSourceDuplicate(event, events)
     if (existing) {
-      mergeEvents(existing, event)
+      mergeCrossSource(existing, event, {
+        onPriorityUpgrade: (evt, from) => {
+          batchQueue.anomalies.push({
+            type: 'PRIORITY_UPGRADE',
+            eventId: evt.id,
+            from,
+            to: evt.priority,
+            timestamp: new Date().toISOString(),
+          })
+        },
+      })
       batchQueue.updated.push({ ...existing })
     } else {
+      initializeCorroborationFields(event)
       events.push(event)
       eventMap.set(event.id, event)
       batchQueue.added.push({ ...event })

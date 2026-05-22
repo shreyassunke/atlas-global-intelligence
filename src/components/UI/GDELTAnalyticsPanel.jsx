@@ -101,6 +101,14 @@ function Empty({ children }) {
   return <p className="text-[11px] text-white/35">{children}</p>
 }
 
+/** One-line empty state plus per-endpoint failure from `fetchGdeltAnalyticsBundle.errors`. */
+function emptyTextForKey(errors, key, fallback) {
+  const err = errors?.find((e) => e.key === key)
+  if (!err?.message) return fallback
+  const msg = err.message.length > 120 ? `${err.message.slice(0, 117)}…` : err.message
+  return `${fallback} (${msg})`
+}
+
 function TimelineCard({ rows, color, height = 160, label = 'Value', emptyText = 'No data.' }) {
   if (!rows.length) return <Empty>{emptyText}</Empty>
   return (
@@ -384,23 +392,43 @@ function TrendsTab({ ctx, timespan, dimColor }) {
       <WarnBanner errors={data.errors} />
       <SummaryCard query={ctx?.query} timespan={timespan} />
       <Section title="Coverage volume">
-        <TimelineCard rows={volRows} color={dimColor} label="Articles" emptyText="No timeline data." />
+        <TimelineCard
+          rows={volRows}
+          color={dimColor}
+          label="Articles"
+          emptyText={emptyTextForKey(data.errors, 'volume', 'No timeline data for this query.')}
+        />
       </Section>
       <MentionsSpreadCard query={ctx?.query} timespan={timespan} dimColor={dimColor} />
       <HistoricalPrecedentCard query={ctx?.query} />
       <Section title="Tone trajectory">
-        <TimelineCard rows={toneRows} color="#7F77DD" label="Avg tone" emptyText="No tone timeline." />
+        <TimelineCard
+          rows={toneRows}
+          color="#7F77DD"
+          label="Avg tone"
+          emptyText={emptyTextForKey(data.errors, 'toneTimeline', 'No tone timeline for this query.')}
+        />
       </Section>
       <GcamRadarCard query={ctx?.query} />
       <Section title="Source countries (window)">
-        <VerticalBarCard data={data.sourceCountries} color={dimColor} label="Attention" emptyText="No country breakdown." />
+        <VerticalBarCard
+          data={data.sourceCountries}
+          color={dimColor}
+          label="Attention"
+          emptyText={emptyTextForKey(data.errors, 'sourceCountries', 'No country breakdown for this window.')}
+        />
       </Section>
       <Section title="Tone distribution">
-        <HistogramCard data={data.toneBins} color="#EF9F27" label="Articles" emptyText="No histogram returned for this query." />
+        <HistogramCard
+          data={data.toneBins}
+          color="#EF9F27"
+          label="Articles"
+          emptyText={emptyTextForKey(data.errors, 'toneBins', 'No tone histogram for this query.')}
+        />
       </Section>
       <Section title="Themes (word cloud)">
         {!data.words?.length ? (
-          <Empty>No word cloud data.</Empty>
+          <Empty>{emptyTextForKey(data.errors, 'words', 'No word cloud data for this query.')}</Empty>
         ) : (
           <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1.5 rounded-lg border border-white/5 bg-black/20 px-2 py-3">
             {data.words.map(({ word, weight }) => {

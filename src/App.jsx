@@ -1,13 +1,9 @@
-import { useEffect, useState, useRef, useCallback, useMemo, lazy, Suspense } from 'react'
+import { useEffect, useState, useRef, useCallback, useMemo, lazy, Suspense, Component } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useAtlasStore } from './store/atlasStore'
 import { useNewsData } from './hooks/useNewsData'
 import Onboarding from './components/Onboarding/Onboarding'
 import CesiumStarfieldBackground from './components/Onboarding/CesiumStarfieldBackground'
-import BackgroundAudio from './components/Audio/BackgroundAudio'
-import SpotifyOAuthCallback from './components/Audio/SpotifyOAuthCallback'
-import SpotifyBgmController from './components/Audio/SpotifyBgmController'
-import YouTubeBgmPlayer from './components/Audio/YouTubeBgmPlayer'
 import Header from './components/UI/Header'
 import FilterPanel from './components/UI/FilterPanel'
 import NewsCard from './components/UI/NewsCard'
@@ -19,9 +15,18 @@ import StreetViewOverlay from './components/UI/StreetViewOverlay'
 import YouTubeEmbedOverlay from './components/UI/YouTubeEmbedOverlay'
 import SettingsPanel from './components/UI/SettingsPanel'
 import DimensionFilters from './components/UI/DimensionFilters'
-import FetchStatusOverlay, { GdeltConnectingBanner } from './components/UI/FetchStatusOverlay'
+import FetchStatusOverlay from './components/UI/FetchStatusOverlay'
+import AtlasBootstrapOverlay from './components/UI/AtlasBootstrapOverlay'
 import SearchResultCard from './components/UI/SearchResultCard'
 import { usePreferencesSync } from './hooks/usePreferencesSync'
+import useAtlasBootstrap from './hooks/useAtlasBootstrap'
+import useLandmarkPresets from './hooks/useLandmarkPresets'
+import useAtlasUrlSync from './hooks/useAtlasUrlSync'
+import useWatchlistAlerts from './hooks/useWatchlistAlerts'
+import useAlertDispatch from './hooks/useAlertDispatch'
+import ToastHost from './components/UI/ToastHost'
+import { supabase } from './services/supabase'
+import { LANDMARK_SHORTCUT_KEYS } from './config/landmarkPresets'
 import LandingPage from './components/Landing/LandingPage'
 
 // Lazy-load heavy 3D components — Google Map3D / globe.gl / Leaflet are loaded after onboarding.
@@ -31,6 +36,31 @@ const FlatMap = lazy(() => import('./components/Globe/FlatMap'))
 const ParticleEarthTransition = lazy(() => import('./components/Transition/ParticleEarthTransition'))
 
 const SUN_ANGLE_THROTTLE_MS = 50
+
+class GlobeLoadErrorBoundary extends Component {
+  constructor(props) {
+    super(props)
+    this.state = { error: null }
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error }
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="fixed inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-[#050810] px-6 text-center">
+          <p className="text-sm font-medium text-slate-200">Globe failed to load</p>
+          <p className="max-w-md text-xs text-slate-500">
+            {this.state.error.message || 'Check the browser console, then refresh the page.'}
+          </p>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
 export default function App() {
   const [pathTick, setPathTick] = useState(0)
@@ -42,11 +72,27 @@ export default function App() {
   const [globeReady, setGlobeReady] = useState(false)
   const lastSunAngleRef = useRef(0)
   const globeMode = useAtlasStore((s) => s.globeMode)
+  const tacticalMode = useAtlasStore((s) => s.tacticalMode)
   const initEventBusSystem = useAtlasStore((s) => s.initEventBusSystem)
   const colorblindMode = useAtlasStore((s) => s.colorblindMode)
   const [filtersOpen, setFiltersOpen] = useState(false)
   useNewsData()
   usePreferencesSync()
+  const onGlobeView = hasCompletedOnboarding && !launchTransitionActive
+  useAtlasUrlSync(onGlobeView)
+  useWatchlistAlerts(onGlobeView)
+  useAlertDispatch(onGlobeView)
+
+  useEffect(() => {
+    if (!supabase) return undefined
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) useAtlasStore.getState().setUser(session.user)
+    })
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      useAtlasStore.getState().setUser(session?.user ?? null)
+    })
+    return () => subscription.unsubscribe()
+  }, [])
 
   useEffect(() => {
     document.body.setAttribute('data-colorblind', String(colorblindMode))
@@ -89,32 +135,27 @@ export default function App() {
     return window.location.pathname.replace(/\/$/, '') || '/'
   }, [pathTick])
 
-  const isSpotifyOAuthReturn = pathname.endsWith('/spotify-callback')
+  const showLandingLayer = !landingAcknowledged
 
-  const showLandingLayer = !landingAcknowledged && !isSpotifyOAuthReturn
+  const { ready: bootstrapReady, steps: bootstrapSteps, progress: bootstrapProgress, hasFailures: bootstrapHasFailures, timedOut: bootstrapTimedOut } = useAtlasBootstrap(globeReady, onGlobeView)
+  const { flyToLandmark } = useLandmarkPresets()
 
-  /** Intro + ambient BGM only on the main ATLAS tool (globe), not landing, setup, or transition */
-  const bgmToolSurfaceActive =
-    !showLandingLayer && !launchTransitionActive && hasCompletedOnboarding
-
-  const onGlobeView = hasCompletedOnboarding && !launchTransitionActive
   const showStarfield =
-    isSpotifyOAuthReturn ||
     showLandingLayer ||
     !hasCompletedOnboarding ||
     launchTransitionActive ||
-    (onGlobeView && !globeReady)
+    (onGlobeView && !bootstrapReady)
 
   useEffect(() => {
     if (!onGlobeView) setGlobeReady(false)
   }, [onGlobeView])
 
-  // Initialize EventBus when globe view is active
+  // Warm data workers as soon as the user enters the app (landing / transition / globe).
   useEffect(() => {
-    if (onGlobeView) {
+    if (landingAcknowledged || launchTransitionActive || onGlobeView) {
       initEventBusSystem()
     }
-  }, [onGlobeView]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [landingAcknowledged, launchTransitionActive, onGlobeView]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const onSunAngle = useCallback((angleRad) => {
     const now = Date.now()
@@ -142,6 +183,17 @@ export default function App() {
         setHudHidden((v) => !v)
       }
 
+      if (
+        LANDMARK_SHORTCUT_KEYS.includes(e.key.toLowerCase()) &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !e.shiftKey
+      ) {
+        e.preventDefault()
+        flyToLandmark(e.key.toLowerCase())
+      }
+
       if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey) {
         const state = useAtlasStore.getState()
         const sorted = [...state.events]
@@ -160,14 +212,10 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
+  }, [flyToLandmark])
 
   return (
     <>
-      <SpotifyOAuthCallback />
-      <BackgroundAudio toolSurfaceActive={bgmToolSurfaceActive} />
-      <SpotifyBgmController toolSurfaceActive={bgmToolSurfaceActive} />
-      <YouTubeBgmPlayer toolSurfaceActive={bgmToolSurfaceActive} />
       {/* Persistent starfield: same instance from setup through transition. Never unmounts until globe. */}
       {showStarfield && (
         <div className="fixed inset-0 z-0" aria-hidden>
@@ -207,20 +255,32 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 1.2, delay: 0.2 }}
-            className="fixed inset-0"
+            className={`fixed inset-0${tacticalMode ? ' atlas-tactical-mode' : ''}`}
           >
-            <Suspense fallback={null}>
-              {globeMode === 'globegl' ? (
-                <GlobeGLView onGlobeReady={() => setGlobeReady(true)} />
-              ) : globeMode === 'leaflet' ? (
-                <FlatMap onGlobeReady={() => setGlobeReady(true)} />
-              ) : (
-                <GoogleGlobe onGlobeReady={() => setGlobeReady(true)} />
-              )}
-            </Suspense>
-            <GdeltConnectingBanner />
+            <GlobeLoadErrorBoundary>
+              <Suspense fallback={
+                <div className="fixed inset-0 z-10 flex items-center justify-center text-xs uppercase tracking-widest text-slate-500">
+                  Loading globe…
+                </div>
+              }>
+                {globeMode === 'globegl' ? (
+                  <GlobeGLView onGlobeReady={() => setGlobeReady(true)} />
+                ) : globeMode === 'leaflet' ? (
+                  <FlatMap onGlobeReady={() => setGlobeReady(true)} />
+                ) : (
+                  <GoogleGlobe onGlobeReady={() => setGlobeReady(true)} />
+                )}
+              </Suspense>
+            </GlobeLoadErrorBoundary>
+            <AtlasBootstrapOverlay
+              visible={!bootstrapReady}
+              steps={bootstrapSteps}
+              progress={bootstrapProgress}
+              hasFailures={bootstrapHasFailures}
+              timedOut={bootstrapTimedOut}
+            />
             <AnimatePresence>
-              {!hudHidden && (
+              {bootstrapReady && !hudHidden && (
                 <motion.div
                   key="hud-layer"
                   initial={{ opacity: 0 }}
@@ -259,6 +319,7 @@ export default function App() {
                   <SettingsPanel />
                   <FetchStatusOverlay />
                   <SearchResultCard />
+                  <ToastHost />
                 </motion.div>
               )}
             </AnimatePresence>

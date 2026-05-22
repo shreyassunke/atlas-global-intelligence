@@ -43,6 +43,10 @@ export const SOURCE_CATALOG = {
   'ofac-sdn':       { name: 'OFAC SDN',               module: MODULES.DIPLOMATIC,    dimension: DIMENSIONS.GOVERNANCE,   authoritative: true,  requiresKey: false,  pollInterval: 86_400_000 },
   'loc-legal':      { name: 'Global Legal Monitor',   module: MODULES.DIPLOMATIC,    dimension: DIMENSIONS.GOVERNANCE,   authoritative: false, requiresKey: false,  pollInterval: 3_600_000 },
   celestrak:        { name: 'Celestrak SOCRATES',      module: MODULES.SPACE,         dimension: DIMENSIONS.ENVIRONMENT,  authoritative: false, requiresKey: false,  pollInterval: 3_600_000 },
+  opensky:          { name: 'OpenSky ADS-B',           module: MODULES.FLIGHT,        dimension: DIMENSIONS.NARRATIVE,    authoritative: false, requiresKey: false,  pollInterval: 10_000 },
+  'celestrak-tle':  { name: 'CelesTrak Satellites',    module: MODULES.SPACE,         dimension: DIMENSIONS.ENVIRONMENT,  authoritative: false, requiresKey: false,  pollInterval: 3_600_000 },
+  aisstream:        { name: 'AISStream Vessels',       module: MODULES.MARITIME,      dimension: DIMENSIONS.ECONOMY,      authoritative: false, requiresKey: true,   pollInterval: 20_000 },
+  'noaa-nhc':       { name: 'NOAA NHC Hurricanes',     module: MODULES.WEATHER,       dimension: DIMENSIONS.ENVIRONMENT,  authoritative: true,  requiresKey: false,  pollInterval: 300_000 },
 }
 
 export function getSourceInfo(sourceId) {

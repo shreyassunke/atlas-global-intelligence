@@ -122,6 +122,111 @@ export function buildBriefMarkdown(state) {
 }
 
 /**
+ * Phase 5 — Dossier brief: renders the composed dossier (trend, live
+ * signals, narrative, evidence) rather than the visible-pin snapshot.
+ *
+ * @param {Object} d
+ * @param {{ fips, iso, name }} d.target
+ * @param {{ avgGoldstein?: number, events?: number }|null} d.stability
+ * @param {{ zScore: number, date: string }|null} d.surge
+ * @param {Array<{ x: string, v: number }>} d.volumeRows
+ * @param {Array<{ x: string, v: number }>} d.toneRows
+ * @param {Array} d.signals — store events scoped to the country
+ * @param {Array} d.sentences — Context API sentences
+ * @param {Array<{ name, value }>} d.sourceCountries
+ * @param {Array} d.articles — DOC artlist evidence
+ * @param {Array} d.clips — TV clip evidence
+ * @param {string} d.timeFilter
+ * @param {string} [d.shareUrl] — deep link with ?dossier= (caller builds from full view state)
+ * @returns {string}
+ */
+export function buildDossierBriefMarkdown(d) {
+  const now = new Date()
+  const name = d.target?.name || 'Unknown'
+  const code = d.target?.iso || d.target?.fips || ''
+  const shareUrl = d.shareUrl || ''
+
+  const lines = [
+    `# ATLAS Dossier — ${name}${code ? ` (${code})` : ''}`,
+    '',
+    `Generated: ${now.toISOString()}`,
+    `Window: ${d.timeFilter || 'live'}`,
+    shareUrl ? `Shareable link: ${shareUrl}` : '',
+    '',
+    '## Stability',
+  ]
+
+  if (d.stability) {
+    const g = Number(d.stability.avgGoldstein)
+    lines.push(
+      `- Avg Goldstein (5y): ${Number.isFinite(g) ? g.toFixed(2) : '—'} (−10 conflict … +10 cooperation)`,
+      `- Events (5y): ${Number(d.stability.events || 0).toLocaleString()}`,
+    )
+  } else {
+    lines.push('_No stability data (BigQuery proxy unavailable)._')
+  }
+
+  lines.push('', '## Activity surge')
+  if (d.surge && Number.isFinite(d.surge.zScore)) {
+    lines.push(`- Latest z-score vs 30-day baseline: ${d.surge.zScore.toFixed(2)} (${d.surge.date || 'latest day'})`)
+  } else {
+    lines.push('_No surge data._')
+  }
+
+  const volTail = (d.volumeRows || []).slice(-7)
+  if (volTail.length) {
+    lines.push('', '## Coverage volume (last points)')
+    for (const r of volTail) lines.push(`- ${r.x}: ${r.v}`)
+  }
+
+  lines.push('', `## Live signals (${(d.signals || []).length})`, '')
+  if (!d.signals?.length) {
+    lines.push('_No live events scoped to this country._')
+  } else {
+    for (const evt of d.signals.slice(0, 25)) {
+      const dim = DIMENSION_LABELS[evt.dimension] || evt.dimension
+      const pri = PRIORITY_LABELS[evt.priority] || evt.priority
+      const corr = evt.corroborationScore != null ? ` · corroboration ${Math.round(evt.corroborationScore * 100)}%` : ''
+      lines.push(
+        `- **${evt.title || 'Untitled'}** — ${pri} · ${dim} · ${evt.source || 'unknown'}${corr}`,
+      )
+    }
+  }
+
+  if (d.sentences?.length) {
+    lines.push('', '## Narrative (Context sentences)', '')
+    for (const s of d.sentences.slice(0, 8)) {
+      lines.push(`> ${s.text}`, s.url ? `> — [${s.domain || s.url}](${s.url})` : '', '')
+    }
+  }
+
+  if (d.sourceCountries?.length) {
+    lines.push('', '## Who is covering this', '')
+    for (const sc of d.sourceCountries.slice(0, 10)) {
+      lines.push(`- ${sc.name}: ${Math.round(sc.value)}`)
+    }
+  }
+
+  if (d.articles?.length) {
+    lines.push('', '## Evidence — articles', '')
+    for (const a of d.articles.slice(0, 12)) {
+      lines.push(`- [${a.title || a.url}](${a.url})${a.domain ? ` — ${a.domain}` : ''}`)
+    }
+  }
+
+  if (d.clips?.length) {
+    lines.push('', '## Evidence — TV clips', '')
+    for (const c of d.clips.slice(0, 8)) {
+      const label = [c.station, c.show].filter(Boolean).join(' · ')
+      lines.push(`- ${label || 'Clip'}${c.archiveUrl ? ` — [archive](${c.archiveUrl})` : ''}`)
+    }
+  }
+
+  lines.push('', '---', '_Client-side dossier snapshot from ATLAS. Verify critical claims against primary sources._')
+  return lines.filter((l) => l !== undefined).join('\n')
+}
+
+/**
  * @param {string} markdown
  * @param {string} [filename]
  */

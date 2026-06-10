@@ -52,21 +52,19 @@ export const GLOBE_DATA_LAYER_KEYS = {
   NHC_STORMS: 'nhcStorms',
   /** Open-Meteo wind particle overlay (Globe.GL) — $0, no key */
   WIND_OVERLAY: 'windOverlay',
-  /** Bluesky Jetstream social signals — $0, no key */
-  BLUESKY: 'bluesky',
-  /** Google Fact Check Tools ClaimReview overlay — $0 with server API key */
-  FACT_CHECK: 'factCheck',
 }
 
 /**
- * Globe pins (Map3D / Globe.GL / FlatMap) are limited to GDELT and NASA natural / satellite
- * feeds (EONET, FIRMS), plus Phase 1 tactical layers (ADS-B, satellites).
- * Commercial news API items use the dock feed only.
- * @returns {'gdelt'|'eonet'|'firms'|'adsb'|'satellites'|null}
+ * Globe pins (Map3D / Globe.GL / FlatMap) are limited to authoritative feeds
+ * (USGS, GDACS, EONET, FIRMS, NHC), high-confidence GDELT CAMEO signals, and
+ * tactical track layers. GDELT DOC articles, VGKG imagery, Bluesky posts, and
+ * fact-check claims never pin — they route to the ticker/feed and Inspector.
+ * @returns {'gdeltSignals'|'eonet'|'firms'|'usgs'|'gdacs'|'adsb'|'satellites'|'ais'|'nhcStorms'|null}
  */
 export function eventSourceToGlobeDataLayerKey(source) {
   const s = (source || '').toLowerCase()
-  if (s.includes('gdelt')) return 'gdelt'
+  if (s.includes('gdelt cameo')) return 'gdeltSignals'
+  if (s.includes('gdelt')) return null // DOC articles + VGKG — panel/ticker only
   if (s.includes('eonet')) return 'eonet'
   if (s.includes('firms')) return 'firms'
   if (s.includes('usgs')) return 'usgs'
@@ -75,8 +73,6 @@ export function eventSourceToGlobeDataLayerKey(source) {
   if (s.includes('celestrak tle') || s.includes('celestrak-tle')) return 'satellites'
   if (s.includes('aisstream')) return 'ais'
   if (s.includes('noaa nhc') || s.includes('noaa-nhc')) return 'nhcStorms'
-  if (s.includes('bluesky')) return 'bluesky'
-  if (s.includes('fact check') || s.includes('fact-check')) return 'factCheck'
   return null
 }
 

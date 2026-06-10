@@ -14,7 +14,7 @@
  *
  * Day/night cycle reference: https://globe.gl/example/day-night-cycle/
  */
-import { useEffect, useRef, useCallback, startTransition, useMemo, useState } from 'react'
+import { useEffect, useRef, startTransition, useState } from 'react'
 import useShareCameraBridge from '../../hooks/useShareCameraBridge'
 import Globe from 'globe.gl'
 import {
@@ -28,13 +28,17 @@ import * as solar from 'solar-calculator'
 import { useAtlasStore } from '../../store/atlasStore'
 import { isMobileDevice } from '../../config/qualityTiers'
 import { getTimezoneViewCenter } from '../../utils/geo'
-import { getCategoryColor } from '../../utils/categoryColors'
-import { DIMENSION_COLORS } from '../../core/eventSchema'
-import useGdeltGeoOverlay from '../../hooks/useGdeltGeoOverlay'
-import { toneToChoroplethRgba } from '../../services/gdelt/geoService'
+import {
+    useGlobeViewModels,
+    applyMarkerClick,
+    applyBackgroundClick,
+    applyMarkerHover,
+    applyCountryClick,
+    resolveFlyToTarget,
+    markerRingMaxRadius,
+} from '../../globe-core'
 import { activeGibsImageryKey, gibsTileEngineUrlForKey } from '../../config/gibsBasemap'
 import { buildTerminatorRing } from '../../core/solarTerminator'
-import useGlobeLayerEvents from '../../hooks/useGlobeLayerEvents'
 import { showDetectionLabel as getDetectionLabel } from '../../core/detectionLabels'
 import WindParticleOverlay from './WindParticleOverlay'
 
@@ -45,7 +49,6 @@ const EARTH_BUMP = 'https://unpkg.com/three-globe/example/img/earth-topology.png
 const BG_IMG = 'https://cdn.jsdelivr.net/npm/three-globe/example/img/night-sky.png'
 
 const POINT_ALTITUDE = 0.01
-const RING_MAX_RADIUS = 3
 const RING_PROPAGATION_SPEED = 2
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -228,28 +231,13 @@ export default function GlobeGLView({ onGlobeReady }) {
     const qualityOverrides = useAtlasStore((s) => s.qualityOverrides)
     const isMobile = isMobileDevice()
 
-    const { globePlottedEvents, tacticalAircraft, tacticalVessels, tacticalSatellites, stormOverlays } = useGlobeLayerEvents()
+    const { allMarkers, choropleth, heatmapPoints, stormOverlays } = useGlobeViewModels()
 
-    const setSelectedMarker = useAtlasStore((s) => s.setSelectedMarker)
-    const setHoveredMarker = useAtlasStore((s) => s.setHoveredMarker)
-    const setSelectedEvent = useAtlasStore((s) => s.setSelectedEvent)
     const setZoomLevel = useAtlasStore((s) => s.setZoomLevel)
 
-    const { heatmapPoints, choroplethRows, toneRange } = useGdeltGeoOverlay()
-    const heatOn = dataLayers?.gdeltHeatmap !== false
-    const choroOn = dataLayers?.gdeltChoropleth === true
     const gibsImageryKey = activeGibsImageryKey(dataLayers)
     const terminatorOn = dataLayers?.terminator !== false
     const windOn = dataLayers?.windOverlay === true
-    const getEventColor = useCallback((event) => {
-        return DIMENSION_COLORS[event.dimension] || '#1a90ff'
-    }, [])
-
-    /** Get event point radius based on severity */
-    const getEventRadius = useCallback((event) => {
-        const base = event.severity >= 4 ? 0.55 : event.severity >= 3 ? 0.42 : 0.3
-        return base
-    }, [])
 
     useShareCameraBridge({
         ready: globeReady,
@@ -273,51 +261,6 @@ export default function GlobeGLView({ onGlobeReady }) {
             }
         },
     })
-
-    const getVisibleItems = useCallback(() => {
-        const eventVisible = globePlottedEvents.map((evt) => ({
-            ...evt,
-            lat: evt.lat,
-            lng: evt.lng,
-            category: evt.dimension || 'signals',
-            _isEvent: true,
-            _color: getEventColor(evt),
-            _radius: getEventRadius(evt),
-        }))
-
-        const tacticalVisible = [
-            ...tacticalAircraft.map((evt) => ({
-                ...evt,
-                _isEvent: true,
-                _isTactical: true,
-                _color: evt.isMilitary ? '#ff6b35' : '#00d4ff',
-                _radius: evt.isMilitary ? 0.45 : 0.38,
-            })),
-            ...tacticalVessels.map((evt) => ({
-                ...evt,
-                _isEvent: true,
-                _isTactical: true,
-                _color: '#4dd4ff',
-                _radius: 0.4,
-            })),
-            ...tacticalSatellites.map((evt) => ({
-                ...evt,
-                _isEvent: true,
-                _isTactical: true,
-                _color: evt.isMilitary ? '#ff6b35' : '#c8ff00',
-                _radius: 0.32,
-            })),
-            ...stormOverlays.filter((s) => s.lat != null && s.lng != null).map((evt) => ({
-                ...evt,
-                _isEvent: true,
-                _isTactical: true,
-                _color: '#ff7846',
-                _radius: 0.55,
-            })),
-        ]
-
-        return [...eventVisible, ...tacticalVisible]
-    }, [globePlottedEvents, tacticalAircraft, tacticalVessels, tacticalSatellites, stormOverlays, getEventColor, getEventRadius])
 
     // ── Initialise globe once ──
     useEffect(() => {
@@ -490,33 +433,18 @@ export default function GlobeGLView({ onGlobeReady }) {
             })
         }
 
-        // ── Points layer ──
+        // ── Points layer (marker view-models from globe-core) ──
         // pointsMerge MUST be false for per-point click/hover events to fire
         globe
             .pointsData([])
             .pointLat('lat')
             .pointLng('lng')
-            .pointColor((d) => d._isEvent ? (d._color || '#1a90ff') : getCategoryColor(d.category))
+            .pointColor((d) => d.color || '#1a90ff')
             .pointAltitude(POINT_ALTITUDE)
-            .pointRadius((d) => {
-                if (d._isEvent) return d._radius || 0.35
-                return d.mediaType === 'video' ? 0.5 : 0.35
-            })
+            .pointRadius((d) => d.radiusGl || 0.35)
             .pointsMerge(false)
             .onPointClick((d) => {
-                if (d._isEvent && d.source === 'GDELT') {
-                    // Open GDELT events as NewsCards per user design request
-                    setSelectedMarker(d)
-                    setSelectedEvent(null)
-                } else if (d._isEvent) {
-                    // Select as traditional intelligence event panel
-                    setSelectedEvent(d)
-                    setSelectedMarker(null)
-                } else {
-                    // Open the NewsCard (legacy fallback)
-                    setSelectedMarker(d)
-                    setSelectedEvent(null)
-                }
+                applyMarkerClick(d.raw || d)
                 // Fly closer to the clicked marker
                 const currentAlt = globe.pointOfView().altitude ?? 2.5
                 const targetAlt = Math.max(0.15, Math.min(0.8, currentAlt * 0.4))
@@ -526,19 +454,15 @@ export default function GlobeGLView({ onGlobeReady }) {
                 )
             })
             .onPointHover((d) => {
-                // Hover tooltip (RegionRing) — needs _screenX/_screenY
+                // Hover tooltip (HoverLabel) — needs _screenX/_screenY.
+                // Globe.GL doesn't pass screen coords directly, so read the
+                // current mouse position from the last pointermove.
                 if (d) {
-                    // Globe.GL doesn't pass screen coords directly, so
-                    // read the current mouse position from the last pointermove
                     const { _lastPointerX: sx, _lastPointerY: sy } = container
-                    setHoveredMarker({
-                        ...d,
-                        _screenX: sx ?? window.innerWidth / 2,
-                        _screenY: sy ?? window.innerHeight / 2,
-                    })
+                    applyMarkerHover(d.raw || d, sx, sy)
                     container.style.cursor = 'pointer'
                 } else {
-                    setHoveredMarker(null)
+                    applyMarkerHover(null)
                     container.style.cursor = 'grab'
                 }
             })
@@ -552,9 +476,7 @@ export default function GlobeGLView({ onGlobeReady }) {
 
         // ── Globe background click — dismiss both news card and event panel ──
         globe.onGlobeClick(() => {
-            const store = useAtlasStore.getState()
-            if (store.selectedMarker) store.setSelectedMarker(null)
-            if (store.selectedEvent) store.setSelectedEvent(null)
+            applyBackgroundClick()
         })
 
         // ── Rings layer ──
@@ -563,10 +485,7 @@ export default function GlobeGLView({ onGlobeReady }) {
             .ringLat('lat')
             .ringLng('lng')
             .ringColor((d) => {
-                // Use priority color for events, category color for news
-                const c = d._isEvent
-                    ? (d._color || '#1a90ff')
-                    : getCategoryColor(d.category)
+                const c = d.color || '#1a90ff'
                 return (t) => {
                     const alpha = 1 - t
                     const r = parseInt(c.slice(1, 3), 16)
@@ -575,12 +494,7 @@ export default function GlobeGLView({ onGlobeReady }) {
                     return `rgba(${r},${g},${b},${alpha * 0.45})`
                 }
             })
-            .ringMaxRadius((d) => {
-                // Larger rings for higher-severity events
-                if (d._isEvent && d.severity >= 4) return 5
-                if (d._isEvent && d.severity >= 3) return 4
-                return RING_MAX_RADIUS
-            })
+            .ringMaxRadius((d) => markerRingMaxRadius(d))
             .ringPropagationSpeed(RING_PROPAGATION_SPEED)
             .ringRepeatPeriod(() => 2000 + Math.random() * 2000)
             .ringAltitude(POINT_ALTITUDE)
@@ -618,6 +532,12 @@ export default function GlobeGLView({ onGlobeReady }) {
             .polygonSideColor(() => 'rgba(0, 0, 0, 0.08)')
             .polygonStrokeColor(() => 'rgba(255,255,255,0.22)')
             .polygonsTransitionDuration(600)
+            // Choropleth country → Dossier (storm cones carry no __fips/name)
+            .onPolygonClick((d) => {
+                if (d?.__fips || (d?.name && !d?.__id?.startsWith('storm-cone-'))) {
+                    applyCountryClick({ fips: d.__fips, iso: d.iso, name: d.name })
+                }
+            })
 
         globe
             .pathsData([])
@@ -645,28 +565,12 @@ export default function GlobeGLView({ onGlobeReady }) {
         // and tighten it when the Places viewport bbox is narrow so the
         // framing roughly matches Google Earth's behaviour.
         useAtlasStore.getState().setOnFlyToLocation((target) => {
-            if (!target) return
-            const { lat, lng, viewport, bbox } = target
-            const box = bbox || viewport
-            const centerLat = Number.isFinite(lat)
-                ? lat
-                : box
-                    ? (box.south + box.north) / 2
-                    : NaN
-            const centerLng = Number.isFinite(lng)
-                ? lng
-                : box
-                    ? (box.west + box.east) / 2
-                    : NaN
-            if (!Number.isFinite(centerLat) || !Number.isFinite(centerLng)) return
-            let altitude = 0.6
-            if (box && Number.isFinite(box.north)) {
-                const latSpan = Math.abs(box.north - box.south)
-                const lngSpan = Math.abs(box.east - box.west)
-                const span = Math.max(latSpan, lngSpan)
-                altitude = Math.max(0.06, Math.min(1.4, span / 45))
-            }
-            globe.pointOfView({ lat: centerLat, lng: centerLng, altitude }, 1400)
+            const t = resolveFlyToTarget(target)
+            if (!t) return
+            const altitude = t.spanDeg != null
+                ? Math.max(0.06, Math.min(1.4, t.spanDeg / 45))
+                : 0.6
+            globe.pointOfView({ lat: t.lat, lng: t.lng, altitude }, 1400)
         })
 
         // Resize
@@ -683,15 +587,10 @@ export default function GlobeGLView({ onGlobeReady }) {
         }
         window.addEventListener('resize', onResize)
 
-        // Signal ready
+        // Signal ready — the marker-sync effect below pushes pointsData
         const readyTimer = setTimeout(() => {
             setGlobeReady(true)
             if (onGlobeReadyRef.current) onGlobeReadyRef.current()
-            // After globe init, force data sync from current store
-            setTimeout(() => {
-                const visible = getVisibleItems()
-                globe.pointsData(visible)
-            }, 500)
         }, 500)
 
         return () => {
@@ -700,7 +599,7 @@ export default function GlobeGLView({ onGlobeReady }) {
             container.removeEventListener('pointerdown', stopRotate)
             container.removeEventListener('wheel', stopRotate)
             container.removeEventListener('pointermove', onPointerMove)
-            setHoveredMarker(null)
+            applyMarkerHover(null)
             clearTimeout(idleTimerRef.current)
             clearTimeout(readyTimer)
             if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
@@ -762,13 +661,12 @@ export default function GlobeGLView({ onGlobeReady }) {
         return () => clearInterval(id)
     }, [terminatorOn, stormOverlays])
 
-    // ── Update data ──
+    // ── Marker view-model sync ──
     useEffect(() => {
         const globe = globeRef.current
         if (!globe) return
-        const visible = getVisibleItems()
-        globe.pointsData(visible)
-        const ringItems = visible
+        globe.pointsData(allMarkers)
+        const ringItems = [...allMarkers]
             .sort((a, b) => (b.severity || 0) - (a.severity || 0))
             .slice(0, isMobile ? 15 : 80)
         globe.ringsData(ringItems)
@@ -779,9 +677,9 @@ export default function GlobeGLView({ onGlobeReady }) {
             selectedEventId: selectedEvent?.id,
         }
         const labelItems = detectionMode
-            ? visible
+            ? allMarkers
                 .map((d, idx) => {
-                    const label = getDetectionLabel(d, idx, detOpts)
+                    const label = getDetectionLabel(d.raw, idx, detOpts)
                     if (!label) return null
                     return { lat: d.lat, lng: d.lng, title: label }
                 })
@@ -789,29 +687,17 @@ export default function GlobeGLView({ onGlobeReady }) {
             : []
         globe.labelsData(labelItems)
         globe.labelColor(() => (detectionMode ? 'rgba(136, 255, 170, 0.95)' : 'rgba(255, 255, 255, 0.85)'))
-        if (detectionMode) {
-            globe.ringMaxRadius((d) => (d._isEvent ? 2.8 : RING_MAX_RADIUS))
-        } else {
-            globe.ringMaxRadius((d) => {
-                if (d._isEvent && d.severity >= 4) return 5
-                if (d._isEvent && d.severity >= 3) return 4
-                return RING_MAX_RADIUS
-            })
-        }
-    }, [globePlottedEvents, tacticalAircraft, tacticalVessels, tacticalSatellites, getVisibleItems, isMobile, detectionMode, detectionLabelDensity, selectedEvent?.id])
+        globe.ringMaxRadius((d) => markerRingMaxRadius(d, detectionMode))
+    }, [allMarkers, isMobile, detectionMode, detectionLabelDensity, selectedEvent?.id])
 
     // ── GDELT heatmap data sync ──
     useEffect(() => {
         const globe = globeRef.current
         if (!globe) return
-        if (!heatOn || heatmapPoints.length === 0) {
-            globe.heatmapsData([])
-            return
-        }
-        globe.heatmapsData([{ points: heatmapPoints }])
-    }, [heatmapPoints, heatOn])
+        globe.heatmapsData(heatmapPoints.length > 0 ? [{ points: heatmapPoints }] : [])
+    }, [heatmapPoints])
 
-    // ── GDELT choropleth data sync ──
+    // ── GDELT choropleth + storm-cone polygon sync ──
     useEffect(() => {
         const globe = globeRef.current
         if (!globe) return
@@ -825,22 +711,18 @@ export default function GlobeGLView({ onGlobeReady }) {
                 },
                 __capColor: 'rgba(255, 120, 60, 0.18)',
             }))
-        if (!choroOn || choroplethRows.length === 0) {
-            globe.polygonsData(stormPolys)
-            return
-        }
-        const min = toneRange?.min ?? -5
-        const max = toneRange?.max ?? 5
-        const polys = choroplethRows.map((r, i) => ({
-            __id: `gdelt-choro-${i}`,
-            geometry: r.geometry,
-            __capColor: toneToChoroplethRgba(r.tone, min, max),
-            name: r.name,
-            tone: r.tone,
-            count: r.count,
+        const polys = choropleth.map((c) => ({
+            __id: c.key,
+            geometry: c.geometry,
+            __capColor: c.fill,
+            __fips: c.props?.fips || '',
+            iso: c.iso,
+            name: c.name,
+            tone: c.tone,
+            count: c.count,
         }))
         globe.polygonsData([...stormPolys, ...polys])
-    }, [choroplethRows, toneRange, choroOn, stormOverlays])
+    }, [choropleth, stormOverlays])
 
     // ── Zoom sync ──
     useEffect(() => {

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
 import {
   ResponsiveContainer,
   LineChart,
@@ -776,14 +775,13 @@ function RefreshFooter({ onClick, loading, children }) {
   )
 }
 
-// ── Panel shell ──
+// ── Workbench Analytics tab (Phase 3 — content-only, shell lives in Workbench.jsx) ──
 
-export default function GDELTAnalyticsPanel() {
+export default function AnalyticsTab() {
   const ctx = useAtlasStore((s) => s.gdeltAnalytics)
   const closeGdeltAnalytics = useAtlasStore((s) => s.closeGdeltAnalytics)
   const timeFilter = useAtlasStore((s) => s.timeFilter)
   const setTimeFilter = useAtlasStore((s) => s.setTimeFilter)
-  const mobileMode = useAtlasStore((s) => s.mobileMode)
   const [tab, setTab] = useState('trends')
 
   const timespan = useMemo(() => timespanFromTimeFilter(timeFilter), [timeFilter])
@@ -794,102 +792,101 @@ export default function GDELTAnalyticsPanel() {
     if (ctx) setTab('trends')
   }, [ctx?.query])
 
+  if (!ctx) {
+    return (
+      <div className="space-y-3 px-4 py-3">
+        <div className="workbench-empty" style={{ padding: '20px 12px' }}>
+          No active analysis
+          <br />
+          Select an event or news item and hit &ldquo;GDELT Analyze&rdquo; —
+          <br />
+          or pick a theme below.
+        </div>
+        <ThemeExplorer />
+        <GdeltAttribution compact />
+      </div>
+    )
+  }
+
   return (
-    <AnimatePresence>
-      {ctx ? (
-        <motion.div
-          key="gdelt-analytics"
-          role="dialog"
-          aria-label="GDELT analytics"
-          initial={{ opacity: 0, x: 24 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: 24 }}
-          transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
-          className={
-            mobileMode
-              ? 'fixed z-[46] left-3 right-3 bottom-14 max-h-[72vh] overflow-y-auto rounded-xl border border-white/10 bg-[#080c18]/95 backdrop-blur-xl shadow-2xl'
-              : 'fixed z-[46] right-[var(--hud-padding,16px)] top-[52px] w-[min(440px,calc(100vw-32px))] max-h-[calc(100vh-72px)] overflow-y-auto rounded-xl border border-white/10 bg-[#080c18]/95 backdrop-blur-xl shadow-2xl'
-          }
+    <div role="region" aria-label="GDELT analytics">
+      <div className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-white/10 bg-[#080c18]/98 px-4 py-3 backdrop-blur-md">
+        <div className="min-w-0 flex-1">
+          <div
+            className="inline-flex items-center gap-2 rounded px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.18em]"
+            style={{
+              color: dimColor,
+              border: `1px solid color-mix(in srgb, ${dimColor} 35%, transparent)`,
+              background: `color-mix(in srgb, ${dimColor} 12%, transparent)`,
+            }}
+          >
+            GDELT · {DIMENSION_LABELS[ctx.dimension] || ctx.dimension}
+          </div>
+          <h2 className="mt-1.5 font-semibold leading-snug text-white/95" style={{ fontFamily: 'var(--font-ui)' }}>
+            {ctx.label || 'Topic analytics'}
+          </h2>
+          <p className="mt-1 break-all font-mono text-[10px] leading-relaxed text-white/45" title={ctx.query}>
+            {ctx.query}
+          </p>
+        </div>
+        <button
+          type="button"
+          className="shrink-0 rounded-lg px-2 py-1 text-sm text-white/50 transition hover:bg-white/5 hover:text-white/90"
+          onClick={() => closeGdeltAnalytics()}
+          aria-label="Close analytics"
         >
-          <div className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-white/10 bg-[#080c18]/98 px-4 py-3 backdrop-blur-md">
-            <div className="min-w-0 flex-1">
-              <div
-                className="inline-flex items-center gap-2 rounded px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.18em]"
-                style={{
-                  color: dimColor,
-                  border: `1px solid color-mix(in srgb, ${dimColor} 35%, transparent)`,
-                  background: `color-mix(in srgb, ${dimColor} 12%, transparent)`,
-                }}
-              >
-                GDELT · {DIMENSION_LABELS[ctx.dimension] || ctx.dimension}
-              </div>
-              <h2 className="mt-1.5 font-semibold leading-snug text-white/95" style={{ fontFamily: 'var(--font-ui)' }}>
-                {ctx.label || 'Topic analytics'}
-              </h2>
-              <p className="mt-1 break-all font-mono text-[10px] leading-relaxed text-white/45" title={ctx.query}>
-                {ctx.query}
-              </p>
-            </div>
+          ✕
+        </button>
+      </div>
+
+      <div className="space-y-4 px-4 py-3">
+        {/* Tabs */}
+        <div className="flex gap-1 rounded-md border border-white/5 bg-white/[0.02] p-1">
+          {TABS.map((t) => (
             <button
+              key={t.id}
               type="button"
-              className="shrink-0 rounded-lg px-2 py-1 text-sm text-white/50 transition hover:bg-white/5 hover:text-white/90"
-              onClick={() => closeGdeltAnalytics()}
-              aria-label="Close analytics"
+              onClick={() => setTab(t.id)}
+              className={`flex-1 rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-wide transition ${
+                tab === t.id
+                  ? 'bg-white/10 text-white shadow-inner'
+                  : 'text-white/40 hover:bg-white/5 hover:text-white/70'
+              }`}
             >
-              ✕
+              {t.label}
             </button>
+          ))}
+        </div>
+
+        {/* Timespan selector (BigQuery tabs own their own time range) */}
+        {tab !== 'history' && tab !== 'network' && tab !== 'imagery' && tab !== 'themes' && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[8px] font-bold uppercase tracking-[0.2em] text-white/35">Timespan</span>
+            {TIME_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setTimeFilter(opt.value)}
+                className={`rounded-md px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition ${
+                  timeFilter === opt.value
+                    ? 'bg-[var(--accent)]/25 text-[var(--accent)] ring-1 ring-[var(--accent)]/40'
+                    : 'bg-white/5 text-white/45 hover:bg-white/10 hover:text-white/75'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
           </div>
+        )}
 
-          <div className="space-y-4 px-4 py-3">
-            {/* Tabs */}
-            <div className="flex gap-1 rounded-md border border-white/5 bg-white/[0.02] p-1">
-              {TABS.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => setTab(t.id)}
-                  className={`flex-1 rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-wide transition ${
-                    tab === t.id
-                      ? 'bg-white/10 text-white shadow-inner'
-                      : 'text-white/40 hover:bg-white/5 hover:text-white/70'
-                  }`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Timespan selector (BigQuery tabs own their own time range) */}
-            {tab !== 'history' && tab !== 'network' && tab !== 'imagery' && tab !== 'themes' && (
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[8px] font-bold uppercase tracking-[0.2em] text-white/35">Timespan</span>
-                {TIME_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => setTimeFilter(opt.value)}
-                    className={`rounded-md px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition ${
-                      timeFilter === opt.value
-                        ? 'bg-[var(--accent)]/25 text-[var(--accent)] ring-1 ring-[var(--accent)]/40'
-                        : 'bg-white/5 text-white/45 hover:bg-white/10 hover:text-white/75'
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {tab === 'trends' && <TrendsTab ctx={ctx} timespan={timespan} dimColor={dimColor} />}
-            {tab === 'tv' && <TvTab ctx={ctx} timespan={timespan} />}
-            {tab === 'context' && <ContextTab ctx={ctx} timespan={timespan} />}
-            {tab === 'history' && <HistoryTab ctx={ctx} dimColor={dimColor} />}
-            {tab === 'imagery' && <ImageryTab ctx={ctx} />}
-            {tab === 'network' && <NetworkTab ctx={ctx} />}
-            {tab === 'themes' && <ThemesTab />}
-          </div>
-        </motion.div>
-      ) : null}
-    </AnimatePresence>
+        {tab === 'trends' && <TrendsTab ctx={ctx} timespan={timespan} dimColor={dimColor} />}
+        {tab === 'tv' && <TvTab ctx={ctx} timespan={timespan} />}
+        {tab === 'context' && <ContextTab ctx={ctx} timespan={timespan} />}
+        {tab === 'history' && <HistoryTab ctx={ctx} dimColor={dimColor} />}
+        {tab === 'imagery' && <ImageryTab ctx={ctx} />}
+        {tab === 'network' && <NetworkTab ctx={ctx} />}
+        {tab === 'themes' && <ThemesTab />}
+      </div>
+    </div>
   )
 }

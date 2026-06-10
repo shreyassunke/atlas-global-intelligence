@@ -5,13 +5,25 @@ import SourceSearch from '../Onboarding/SourceSearch'
 import HeaderUserMenu from './HeaderUserMenu'
 import HeaderSearchBar from './HeaderSearchBar'
 import { AtlasWordmark } from './AtlasWordmark'
-import { MissionClock } from './ClockOverlay'
+import { MissionClock } from './MissionClock'
 import { copyShareUrl } from '../../core/urlState'
 import { buildBriefMarkdown, downloadMarkdownBrief, exportBriefPdf } from '../../core/briefExport'
+import { DIMENSIONS, DIMENSION_COLORS, DIMENSION_LABELS, DIMENSION_ICONS } from '../../core/eventSchema'
+import { countUnseenP1 } from '../../core/triage'
 
-const IconFilter = () => (
+/** Inbox tray — the Triage feed ("what changed since you looked"). */
+const IconTriage = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+    <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
+    <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+  </svg>
+)
+
+const IconLayers = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="12 2 2 7 12 12 22 7 12 2" />
+    <polyline points="2 17 12 22 22 17" />
+    <polyline points="2 12 12 17 22 12" />
   </svg>
 )
 
@@ -82,10 +94,99 @@ const IconSetup = () => (
   </svg>
 )
 
-export default function Header({ hudHidden = false, onToggleHud, onToggleFilters, filtersOpen }) {
+const DIMENSION_DEFS = Object.values(DIMENSIONS).map((dim) => ({
+  id: dim,
+  label: DIMENSION_LABELS[dim],
+  icon: DIMENSION_ICONS[dim],
+  color: DIMENSION_COLORS[dim],
+}))
+
+const PRIORITY_OPTIONS = [
+  { value: 'p1', label: 'P1', description: 'Breaking only' },
+  { value: 'p1p2', label: 'P1+P2', description: 'Breaking + Active' },
+  { value: 'all', label: 'All', description: 'Everything' },
+]
+
+const TIME_OPTIONS = [
+  { value: 'live', label: 'Live', title: 'Last 2 hours of geocoded signals' },
+  { value: '24h', label: '24h', title: 'Events from the past 24 hours' },
+  { value: '7d', label: '7d', title: 'Events from the past 7 days' },
+  { value: '30d', label: '30d', title: 'Events from the past 30 days' },
+]
+
+/** Phase 3 — compact dimension chips + one global time control under the header. */
+function FilterStrip() {
+  const activeDimensions = useAtlasStore((s) => s.activeDimensions)
+  const toggleDimension = useAtlasStore((s) => s.toggleDimension)
+  const priorityFilter = useAtlasStore((s) => s.priorityFilter)
+  const setPriorityFilter = useAtlasStore((s) => s.setPriorityFilter)
+  const timeFilter = useAtlasStore((s) => s.timeFilter)
+  const setTimeFilter = useAtlasStore((s) => s.setTimeFilter)
+  const mobileMode = useAtlasStore((s) => s.mobileMode)
+
+  return (
+    <motion.div
+      className="hud-filter-strip"
+      initial={{ opacity: 0, y: -8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 1.7, duration: 0.5 }}
+      role="toolbar"
+      aria-label="Dimension and time filters"
+    >
+      {DIMENSION_DEFS.map((d) => {
+        const active = activeDimensions.has(d.id)
+        return (
+          <button
+            key={d.id}
+            type="button"
+            className={`hud-dim-chip ${active ? 'active' : ''}`}
+            style={{ '--chip-color': d.color }}
+            onClick={() => toggleDimension(d.id)}
+            title={`${d.label} — ${active ? 'on' : 'off'}`}
+          >
+            <span className="hud-dim-chip-dot" style={{ backgroundColor: d.color }} />
+            {mobileMode ? d.icon : d.label}
+          </button>
+        )
+      })}
+
+      <span className="hud-strip-divider" aria-hidden />
+
+      <div className="hud-strip-group" role="group" aria-label="Priority filter">
+        {PRIORITY_OPTIONS.map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            className={`hud-strip-btn ${priorityFilter === opt.value ? 'active' : ''}`}
+            onClick={() => setPriorityFilter(opt.value)}
+            title={opt.description}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="hud-strip-group" role="group" aria-label="Time range">
+        {TIME_OPTIONS.map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            className={`hud-strip-btn ${timeFilter === opt.value ? 'active' : ''}`}
+            onClick={() => setTimeFilter(opt.value)}
+            title={opt.title}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+    </motion.div>
+  )
+}
+
+export default function Header({ hudHidden = false, onToggleHud }) {
   const isLoading = useAtlasStore((s) => s.isLoading)
-  const toggleSettings = useAtlasStore((s) => s.toggleSettings)
-  const settingsOpen = useAtlasStore((s) => s.settingsOpen)
+  const workbench = useAtlasStore((s) => s.ui.workbench)
+  const toggleWorkbench = useAtlasStore((s) => s.toggleWorkbench)
   const resetView = useAtlasStore((s) => s.resetView)
   const reopenOnboarding = useAtlasStore((s) => s.reopenOnboarding)
   const reopenLanding = useAtlasStore((s) => s.reopenLanding)
@@ -96,6 +197,7 @@ export default function Header({ hudHidden = false, onToggleHud, onToggleFilters
   const [moreOpen, setMoreOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const pushToast = useAtlasStore((s) => s.pushToast)
+  const unseenTriage = useAtlasStore((s) => countUnseenP1(s.events, s.triageLastSeenAt))
 
   const handleCopyShareLink = async () => {
     const state = useAtlasStore.getState()
@@ -198,16 +300,27 @@ export default function Header({ hudHidden = false, onToggleHud, onToggleFilters
           {!mobileMode && (
             <>
               <button
-                onClick={onToggleFilters}
-                className={`hud-icon-btn ${filtersOpen ? 'active' : ''}`}
-                title="Dimension filters"
+                onClick={() => toggleWorkbench('triage')}
+                className={`hud-icon-btn hud-icon-btn-badged ${workbench === 'triage' ? 'active' : ''}`}
+                title="Triage — what changed since you looked"
               >
-                <IconFilter />
+                <IconTriage />
+                {unseenTriage > 0 && (
+                  <span className="hud-icon-badge">{unseenTriage > 99 ? '99+' : unseenTriage}</span>
+                )}
               </button>
 
               <button
-                onClick={toggleSettings}
-                className={`hud-icon-btn ${settingsOpen ? 'active' : ''}`}
+                onClick={() => toggleWorkbench('layers')}
+                className={`hud-icon-btn ${workbench === 'layers' ? 'active' : ''}`}
+                title="Globe layers"
+              >
+                <IconLayers />
+              </button>
+
+              <button
+                onClick={() => toggleWorkbench('settings')}
+                className={`hud-icon-btn ${workbench === 'settings' ? 'active' : ''}`}
                 title="Settings"
               >
                 <IconSettings />
@@ -251,15 +364,25 @@ export default function Header({ hudHidden = false, onToggleHud, onToggleFilters
                   {mobileMode && (
                     <>
                       <button
-                        className={`hud-dropdown-item ${filtersOpen ? 'is-active' : ''}`}
-                        onClick={() => { onToggleFilters?.(); setMoreOpen(false) }}
+                        className={`hud-dropdown-item ${workbench === 'triage' ? 'is-active' : ''}`}
+                        onClick={() => { toggleWorkbench('triage'); setMoreOpen(false) }}
                       >
-                        <IconFilter />
-                        <span>Dimension Filters</span>
+                        <IconTriage />
+                        <span>Triage</span>
+                        {unseenTriage > 0 && (
+                          <span className="hud-dropdown-badge">{unseenTriage > 99 ? '99+' : unseenTriage}</span>
+                        )}
                       </button>
                       <button
-                        className={`hud-dropdown-item ${settingsOpen ? 'is-active' : ''}`}
-                        onClick={() => { toggleSettings(); setMoreOpen(false) }}
+                        className={`hud-dropdown-item ${workbench === 'layers' ? 'is-active' : ''}`}
+                        onClick={() => { toggleWorkbench('layers'); setMoreOpen(false) }}
+                      >
+                        <IconLayers />
+                        <span>Globe Layers</span>
+                      </button>
+                      <button
+                        className={`hud-dropdown-item ${workbench === 'settings' ? 'is-active' : ''}`}
+                        onClick={() => { toggleWorkbench('settings'); setMoreOpen(false) }}
                       >
                         <IconSettings />
                         <span>Settings</span>
@@ -334,6 +457,8 @@ export default function Header({ hudHidden = false, onToggleHud, onToggleFilters
           </div>
         </div>
       </motion.header>
+
+      <FilterStrip />
 
       {/* Source search panel */}
       <AnimatePresence>

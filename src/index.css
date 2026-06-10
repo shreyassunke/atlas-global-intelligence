@@ -44,6 +44,16 @@
   --hud-padding: 16px;
   --panel-gap: 12px;
 
+  /*
+   * Phase 3 — fixed region model. Five z tokens only:
+   *   globe (canvas) < ticker (bottom feed) < hud (header + strip) < rail (inspector / workbench) < modal (StreetView, YouTube, toasts)
+   */
+  --z-globe: 10;
+  --z-ticker: 30;
+  --z-hud: 40;
+  --z-rail: 45;
+  --z-modal: 100;
+
   /* Dimension colors â€” encodes what kind of event */
   --dim-safety: #E24B4A;
   --dim-governance: #7F77DD;
@@ -1119,34 +1129,7 @@ button.atlas-logo-header-btn:focus-visible {
   opacity: 0.6;
 }
 
-/* â”€â”€ Settings Panel â”€â”€ */
-.settings-panel {
-  position: fixed;
-  top: 50px;
-  right: 6px;
-  z-index: 50;
-  width: 310px;
-  max-height: calc(100vh - 70px);
-  overflow-y: auto;
-  background: rgba(8, 12, 24, 0.92);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  padding: 0;
-  pointer-events: auto;
-}
-
-.settings-panel::-webkit-scrollbar {
-  width: 3px;
-}
-
-.settings-panel::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 2px;
-}
-
+/* â”€â”€ Settings sections (rendered inside the Workbench rail) â”€â”€ */
 .settings-header {
   display: flex;
   align-items: center;
@@ -1415,7 +1398,7 @@ button.atlas-logo-header-btn:focus-visible {
   top: 0;
   left: 0;
   right: 0;
-  z-index: 40;
+  z-index: var(--z-hud);
   height: 42px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
@@ -1763,6 +1746,32 @@ button.atlas-logo-header-btn:focus-visible {
   cursor: pointer;
   transition: all 0.15s ease;
   flex-shrink: 0;
+}
+
+/* Icon buttons that carry a count badge (Triage unseen-P1) */
+.hud-icon-btn-badged {
+  position: relative;
+}
+
+.hud-icon-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #0a0e14;
+  font-family: var(--font-data);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1;
+  pointer-events: none;
 }
 
 .hud-icon-btn:hover {
@@ -2211,6 +2220,27 @@ button.atlas-logo-header-btn:focus-visible {
   color: rgba(255, 255, 255, 0.4);
 }
 
+/* Phase 5 — open the country dossier from a place search result */
+.search-result-card__dossier-btn {
+  margin-top: 10px;
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid rgba(61, 214, 140, 0.22);
+  border-radius: 6px;
+  background: rgba(61, 214, 140, 0.08);
+  color: rgba(61, 214, 140, 0.85);
+  font-family: var(--font-hud);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.search-result-card__dossier-btn:hover {
+  background: rgba(61, 214, 140, 0.16);
+}
+
 @media (max-width: 640px) {
   .search-result-card {
     top: auto;
@@ -2223,22 +2253,6 @@ button.atlas-logo-header-btn:focus-visible {
 }
 
 /* Filters sidebar */
-.hud-filters-sidebar {
-  position: fixed;
-  top: 50px;
-  left: 8px;
-  z-index: 35;
-  width: 180px;
-  background: rgba(8, 12, 24, 0.92);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 10px;
-  padding: 2px 0;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
-  pointer-events: auto;
-}
-
 /* â”€â”€ ATLAS v4 â€” Event System â”€â”€ */
 
 .priority-shape {
@@ -2262,14 +2276,15 @@ button.atlas-logo-header-btn:focus-visible {
   clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
 }
 
-/* Event panel (detail view) */
-.event-panel {
+/* Inspector — left rail, one slot (event / news / place). `.event-panel` kept as alias. */
+.event-panel,
+.inspector-panel {
   position: fixed;
-  top: 50px;
+  top: 86px;
   left: var(--hud-padding);
-  z-index: 45;
+  z-index: var(--z-rail);
   width: 360px;
-  max-height: calc(100vh - 80px);
+  max-height: calc(100vh - 120px);
   overflow-y: auto;
   background: rgba(8, 12, 24, 0.94);
   backdrop-filter: blur(24px);
@@ -2277,6 +2292,403 @@ button.atlas-logo-header-btn:focus-visible {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* Workbench — right rail, tabbed (analytics / layers / settings) */
+.workbench-panel {
+  position: fixed;
+  top: 86px;
+  right: var(--hud-padding);
+  z-index: var(--z-rail);
+  width: min(440px, calc(100vw - 32px));
+  max-height: calc(100vh - 120px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: rgba(8, 12, 24, 0.94);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  pointer-events: auto;
+}
+
+.workbench-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 10px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+}
+
+.workbench-tab {
+  flex: 1;
+  padding: 7px 4px 9px;
+  border: none;
+  background: transparent;
+  border-bottom: 2px solid transparent;
+  font-family: var(--font-hud);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.workbench-tab:hover {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.workbench-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.workbench-close {
+  flex: 0 0 auto;
+  margin-left: 4px;
+  margin-bottom: 6px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 10px;
+  padding: 3px 7px;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.workbench-close:hover {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.workbench-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.workbench-body::-webkit-scrollbar {
+  width: 3px;
+}
+
+.workbench-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+}
+
+.workbench-empty {
+  padding: 36px 20px;
+  text-align: center;
+  font-family: var(--font-hud);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.3);
+  line-height: 1.8;
+}
+
+/* ── Triage tab (Phase 4) — ranked "what changed" feed ── */
+.triage-tab {
+  display: flex;
+  flex-direction: column;
+  padding: 12px 12px 16px;
+  gap: 10px;
+}
+
+.triage-summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 2px 0;
+}
+
+.triage-summary-count {
+  font-family: var(--font-hud);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.triage-summary-window {
+  font-family: var(--font-data);
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.3);
+  white-space: nowrap;
+}
+
+.triage-hint {
+  font-family: var(--font-data);
+  font-size: 9px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.35);
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.triage-empty {
+  padding: 36px 16px;
+  text-align: center;
+  font-family: var(--font-hud);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.3);
+  line-height: 1.9;
+}
+
+.triage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.triage-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-left: 2px solid var(--row-accent, rgba(255, 255, 255, 0.25));
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.triage-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.14);
+  border-left-color: var(--row-accent, rgba(255, 255, 255, 0.4));
+}
+
+.triage-row.is-new {
+  background: rgba(0, 207, 255, 0.04);
+  border-color: rgba(0, 207, 255, 0.16);
+}
+
+.triage-sev {
+  flex-shrink: 0;
+  font-family: var(--font-data);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding-top: 1px;
+}
+
+.triage-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.triage-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.triage-new-tag {
+  font-family: var(--font-hud);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: #0a0e14;
+  background: var(--accent);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
+.triage-kind {
+  font-family: var(--font-hud);
+  font-size: 8px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.triage-dim {
+  font-size: 9px;
+  line-height: 1;
+}
+
+.triage-time {
+  margin-left: auto;
+  font-family: var(--font-data);
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.triage-title {
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: rgba(255, 255, 255, 0.92);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.triage-why {
+  font-family: var(--font-data);
+  font-size: 9.5px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.triage-confidence {
+  align-self: flex-start;
+  font-family: var(--font-data);
+  font-size: 8.5px;
+  letter-spacing: 0.06em;
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid currentColor;
+  margin-top: 2px;
+}
+
+.triage-confidence.tone-high { color: #3dd68c; }
+.triage-confidence.tone-medium { color: #6eb5ff; }
+.triage-confidence.tone-low { color: rgba(255, 255, 255, 0.4); }
+.triage-confidence.tone-flag { color: #ff6b6b; }
+
+/* Corroborating source list appended to the badge (Phase 6) */
+.triage-confidence-sources {
+  letter-spacing: 0.02em;
+  opacity: 0.7;
+}
+
+/* Phase 6 — shared trust badge (Inspector corroboration row) */
+.confidence-badge {
+  display: inline-block;
+  font-family: var(--font-data);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+
+.confidence-badge.tone-high { color: #3dd68c; }
+.confidence-badge.tone-medium { color: #6eb5ff; }
+.confidence-badge.tone-low { color: rgba(255, 255, 255, 0.45); }
+.confidence-badge.tone-flag { color: #ff6b6b; }
+
+/* Header filter strip — dimension chips + global time control (Phase 3) */
+.hud-filter-strip {
+  position: fixed;
+  top: 42px;
+  left: 0;
+  right: 0;
+  z-index: var(--z-hud);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 5px 12px;
+  pointer-events: none;
+}
+
+.hud-filter-strip > * {
+  pointer-events: auto;
+}
+
+.hud-dim-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(8, 12, 24, 0.72);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  font-family: var(--font-hud);
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.35);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+  white-space: nowrap;
+}
+
+.hud-dim-chip .hud-dim-chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  opacity: 0.3;
+  flex-shrink: 0;
+}
+
+.hud-dim-chip.active {
+  color: var(--chip-color, rgba(255, 255, 255, 0.85));
+  border-color: color-mix(in srgb, var(--chip-color, #fff) 38%, transparent);
+  background: color-mix(in srgb, var(--chip-color, #fff) 10%, rgba(8, 12, 24, 0.72));
+}
+
+.hud-dim-chip.active .hud-dim-chip-dot {
+  opacity: 1;
+}
+
+.hud-strip-divider {
+  width: 1px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.12);
+  margin: 0 2px;
+}
+
+.hud-strip-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 2px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(8, 12, 24, 0.72);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.hud-strip-btn {
+  padding: 2px 8px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  font-family: var(--font-hud);
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.35);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+  white-space: nowrap;
+}
+
+.hud-strip-btn:hover {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.hud-strip-btn.active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .event-panel-header {
@@ -2903,24 +3315,17 @@ button.atlas-logo-header-btn:focus-visible {
     max-width: none;
   }
 
-  .hud-filters-sidebar {
-    position: fixed;
-    top: auto;
-    bottom: 52px;
-    left: 0;
-    right: 0;
-    width: 100%;
-    max-height: 45vh;
-    overflow-y: auto;
-    z-index: 36;
-    background: rgba(8, 12, 24, 0.96);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
-    padding: 8px 0;
+  .hud-filter-strip {
+    top: 42px;
+    justify-content: flex-start;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    padding: 5px 8px;
   }
 
-  .event-panel {
+  .event-panel,
+  .inspector-panel {
     width: calc(100vw - 32px);
     left: 16px;
     top: auto;
@@ -2928,9 +3333,12 @@ button.atlas-logo-header-btn:focus-visible {
     max-height: 50vh;
   }
 
-  .settings-panel {
-    width: calc(100vw - 32px) !important;
-    right: 16px !important;
+  .workbench-panel {
+    width: calc(100vw - 32px);
+    right: 16px;
+    top: auto;
+    bottom: 60px;
+    max-height: 60vh;
   }
 
   .hud-dropdown {
@@ -5464,7 +5872,7 @@ button.atlas-logo-header-btn:focus-visible {
   position: fixed;
   bottom: 72px;
   right: 12px;
-  z-index: 70;
+  z-index: var(--z-modal);
   display: flex;
   flex-direction: column;
   gap: 8px;

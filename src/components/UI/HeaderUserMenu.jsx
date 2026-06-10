@@ -58,7 +58,7 @@ export default function HeaderUserMenu() {
   const user = useAtlasStore((s) => s.user)
   const mobileMode = useAtlasStore((s) => s.mobileMode)
   const signOut = useAtlasStore((s) => s.signOut)
-  const toggleSettings = useAtlasStore((s) => s.toggleSettings)
+  const openWorkbench = useAtlasStore((s) => s.openWorkbench)
   const reopenOnboarding = useAtlasStore((s) => s.reopenOnboarding)
 
   const [open, setOpen] = useState(false)
@@ -92,7 +92,7 @@ export default function HeaderUserMenu() {
   const initials = user ? getInitials(user) : ''
 
   const handlePreferences = () => {
-    toggleSettings()
+    openWorkbench('settings')
     close()
   }
 

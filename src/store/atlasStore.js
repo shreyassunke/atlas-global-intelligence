@@ -2,7 +2,17 @@ import { create } from 'zustand'
 import { DEFAULT_SOURCES, NEWS_SOURCES } from '../utils/newsSources'
 import { CATEGORY_KEYS } from '../utils/categoryColors'
 import { loadQualitySettings, saveQualitySettings, loadGlobeMode, saveGlobeMode, QUALITY_TIERS } from '../config/qualityTiers'
-import { initEventBus, startFetching, stopFetching, subscribeToBatchUpdates, subscribeToSourceStatus, destroyEventBus } from '../core/eventBus'
+import {
+  initEventBus,
+  startFetching,
+  stopFetching,
+  reconcileLayerSources,
+  subscribeToBatchUpdates,
+  subscribeToSourceStatus,
+  subscribeToGdeltAggregates,
+  destroyEventBus,
+} from '../core/eventBus'
+import { isLayerToggleOn } from '../core/layerCatalog'
 import { supabase } from '../services/supabase'
 const STORAGE_KEY_SOURCES = 'atlas_selected_sources'
 const STORAGE_KEY_ONBOARDED = 'atlas_onboarded'
@@ -12,46 +22,42 @@ const STORAGE_KEY_DETECTION_MODE = 'atlas_detection_mode'
 const STORAGE_KEY_DETECTION_LABELS = 'atlas_detection_labels'
 /** Legacy key — cleared on reopen so returning users see the landing page first again */
 const STORAGE_KEY_LANDING = 'atlas_landing_ack_v1'
+/** Phase 4 — when the analyst last opened the Triage tab (ms epoch) */
+const STORAGE_KEY_TRIAGE_SEEN = 'atlas_triage_seen_at'
 
 const DEFAULT_DATA_LAYERS = {
-  gdelt: true,           // Geopolitical events from GDELT 2.0
+  // ── event layers (pins) ──
+  gdeltSignals: true,    // High-confidence GDELT CAMEO pins (numSources/severity gated)
   firms: true,           // NASA FIRMS active fires
   usgs: true,            // USGS earthquakes
   gdacs: true,           // GDACS disasters
   eonet: true,           // NASA EONET natural events
-  // GDELT GEO PointHeatmap — off by default. Rendered as wide radial red/yellow
-  // gradient sprites (96px) whose combined footprint leaves faded "ghost dots"
-  // on the globe wherever any article was filed in the last 24h, even when
-  // there's no live event there. Users can re-enable from the data-layers HUD.
-  gdeltHeatmap: false,
-  gdeltChoropleth: false,// GDELT GEO per-country tone choropleth
+  nhcStorms: false,      // NOAA NHC active cyclone tracks + cone-of-error
+  // ── field layers (aggregate surfaces) ──
+  gdeltChoropleth: true, // GDELT per-country tone choropleth — the default monitor surface
+  gdeltHeatmap: false,   // GDELT GEO PointHeatmap (noisy ghost dots; opt-in)
+  windOverlay: false,    // Open-Meteo wind particles (Globe.GL only)
+  // ── track layers (ambient live) ──
+  adsb: false,           // OpenSky ADS-B aircraft — ambient eye candy, opt-in (Phase 6 audit)
+  adsbMilitary: true,    // Military ICAO hex sub-filter (distinct sprite; applies when adsb is on)
+  satellites: false,     // CelesTrak TLE-propagated satellites
+  ais: false,            // AISStream.io vessels at chokepoints (requires AISSTREAM_API_KEY server-side)
+  // ── basemap layers (imagery/context) ──
   gibsTrueColor: false,  // NASA GIBS MODIS true-color WMTS (2D Map + Globe.GL)
-  // Phase 2 — GIBS imagery overlays (mutually exclusive on Globe.GL; stackable on 2D Map)
   gibsFires: false,      // MODIS 7-2-1 fire-sensitive false color
   gibsAerosol: false,    // MODIS Terra aerosol
   gibsDust: false,       // AIRS L2 dust score (day)
   gibsClouds: false,     // MODIS Aqua cloud fraction (day)
   gibsBlackMarble: false,// Enhance night-side city lights (Globe.GL)
   terminator: true,      // Day/night terminator line
-  // Phase 1 — live tactical layers ($0 sources)
-  adsb: true,            // OpenSky ADS-B aircraft (default ON per build plan)
-  adsbMilitary: true,    // Military ICAO hex sub-filter (distinct sprite)
-  satellites: false,     // CelesTrak TLE-propagated satellites
-  // Phase 3 — maritime & storms ($0 sources, default OFF per build plan)
-  ais: false,            // AISStream.io vessels at chokepoints (requires AISSTREAM_API_KEY server-side)
-  nhcStorms: false,      // NOAA NHC active cyclone tracks + cone-of-error
-  windOverlay: false,    // Open-Meteo wind particles (Globe.GL only)
-  // Phase 6 — stretch signals ($0 sources, default OFF per build plan)
-  bluesky: false,        // Bluesky Jetstream social reach — $0, no key
-  factCheck: false,      // Google Fact Check Tools — $0 with GOOGLE_FACT_CHECK_API_KEY server-side
 }
 
 /**
- * One-time migration key: bumped whenever a data-layer default flips from ON
- * to OFF so existing users stop seeing the old layer after pull/reload.
+ * One-time migration key: bumped whenever a data-layer default flips
+ * so existing users converge on the new defaults after pull/reload.
  */
 const DATA_LAYERS_MIGRATION_KEY = 'atlas_data_layers_migration'
-const DATA_LAYERS_MIGRATION_VERSION = 'v4'
+const DATA_LAYERS_MIGRATION_VERSION = 'v6'
 const GIBS_IMAGERY_EXCLUSIVE_KEYS = ['gibsTrueColor', 'gibsFires', 'gibsAerosol', 'gibsDust', 'gibsClouds']
 
 function loadDataLayers() {
@@ -61,12 +67,21 @@ function loadDataLayers() {
       const parsed = JSON.parse(raw)
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         const { labels: _legacyLabels, ...rest } = parsed
-        // v2: GDELT heatmap default flipped to off. Force any stale `true`
-        // from a previous session back to the new default so faded heatmap
-        // blobs don't keep rendering for returning users.
         if (localStorage.getItem(DATA_LAYERS_MIGRATION_KEY) !== DATA_LAYERS_MIGRATION_VERSION) {
+          // v5: gdelt split into gdeltSignals/gdeltChoropleth/gdeltHeatmap;
+          // bluesky/factCheck demoted off the globe; choropleth promoted ON.
+          if (rest.gdelt !== undefined) {
+            rest.gdeltSignals = rest.gdelt
+            delete rest.gdelt
+          }
+          rest.gdeltChoropleth = true
           if (rest.gdeltHeatmap === true) rest.gdeltHeatmap = false
+          delete rest.bluesky
+          delete rest.factCheck
           if (rest.terminator === undefined) rest.terminator = true
+          // v6 (Phase 6 defaults audit): adsb demoted to opt-in — ambient
+          // track noise off the default monitor surface.
+          rest.adsb = false
           try {
             localStorage.setItem(DATA_LAYERS_MIGRATION_KEY, DATA_LAYERS_MIGRATION_VERSION)
             localStorage.setItem(
@@ -185,6 +200,14 @@ function loadFilters() {
 
 const filters = loadFilters()
 
+function loadTriageSeenAt() {
+  try {
+    const v = Number(localStorage.getItem(STORAGE_KEY_TRIAGE_SEEN))
+    if (Number.isFinite(v) && v > 0) return v
+  } catch { /* ignore */ }
+  return 0
+}
+
 export const useAtlasStore = create((set, get) => ({
   newsItems: [],
   activeCategories: new Set(CATEGORY_KEYS),
@@ -225,6 +248,12 @@ export const useAtlasStore = create((set, get) => ({
     choroplethReady: false,
     error: null,
   },
+  /**
+   * Phase 1b — per-country CAMEO aggregates reduced in-worker from the full
+   * 15-min export. `{ byFips: { [FIPS_10]: { events, avgTone, avgGoldstein, quad } }, exportTsMs, totalRows, updatedAt } | null`.
+   * Drives the choropleth directly (no GEO API) and the Triage surge baseline.
+   */
+  gdeltCountryAggregates: null,
   priorityFilter: filters.priority,
   timeFilter: filters.time,
   activeDimensions: loadActiveDimensions(),
@@ -236,6 +265,8 @@ export const useAtlasStore = create((set, get) => ({
 
   // ── Data Layers (globe visualization toggles) ──
   dataLayers: loadDataLayers(),
+  /** Per-layer reveal timestamp for fade-in on enable (ms epoch). */
+  layerRevealAt: {},
 
   // ── Phase 1 — tactical visual modes ──
   /** Desaturate + grain + green tint on globe canvas */
@@ -260,8 +291,15 @@ export const useAtlasStore = create((set, get) => ({
   /** In-app toast queue (watchlist hits, share copy, etc.) */
   toasts: [],
 
-  // ── UI State ──
-  settingsOpen: false,
+  // ── Phase 3 — UI shell: region model + panel coordinator ──
+  /**
+   * Single source of truth for the two work rails:
+   *   inspector — left rail, one slot: { type: 'event'|'news'|'place', payload } | null
+   *   workbench — right rail, tabbed: 'triage'|'dossier'|'analytics'|'layers'|'settings' | null
+   * Opening one inspector content replaces the previous; Escape closes top-most
+   * (modal → workbench → inspector) via closeTopPanel().
+   */
+  ui: { inspector: null, workbench: null },
 
   // ── Quality & Globe Renderer ──
   /** 'cesium' | 'globegl' | 'leaflet' */
@@ -286,7 +324,16 @@ export const useAtlasStore = create((set, get) => ({
 
   setAllCategories: (cats) => set({ activeCategories: new Set(cats) }),
 
-  setSelectedMarker: (marker) => set({ selectedMarker: marker }),
+  setSelectedMarker: (marker) => set((s) => marker
+    ? {
+        selectedMarker: marker,
+        selectedEvent: null,
+        ui: { ...s.ui, inspector: { type: 'news', payload: marker } },
+      }
+    : {
+        selectedMarker: null,
+        ui: s.ui.inspector?.type === 'news' ? { ...s.ui, inspector: null } : s.ui,
+      }),
   setHoveredMarker: (marker) => set({ hoveredMarker: marker }),
   setActiveRegion: (region) => set({ activeRegion: region }),
   setZoomLevel: (level) => set({ zoomLevel: level }),
@@ -352,8 +399,19 @@ export const useAtlasStore = create((set, get) => ({
    * Shape: { lat, lng, label, viewport?: { north,east,south,west }, createdAt }
    */
   searchHighlight: null,
-  setSearchHighlight: (highlight) => set({ searchHighlight: highlight }),
-  clearSearchHighlight: () => set({ searchHighlight: null }),
+  setSearchHighlight: (highlight) => set((s) => highlight
+    ? {
+        searchHighlight: highlight,
+        ui: { ...s.ui, inspector: { type: 'place', payload: highlight } },
+      }
+    : {
+        searchHighlight: null,
+        ui: s.ui.inspector?.type === 'place' ? { ...s.ui, inspector: null } : s.ui,
+      }),
+  clearSearchHighlight: () => set((s) => ({
+    searchHighlight: null,
+    ui: s.ui.inspector?.type === 'place' ? { ...s.ui, inspector: null } : s.ui,
+  })),
 
   /**
    * Each globe renderer registers a fly-to handler on mount so the
@@ -420,8 +478,71 @@ export const useAtlasStore = create((set, get) => ({
     set({ qualityOverrides: {} })
   },
 
-  toggleSettings: () => set((s) => ({ settingsOpen: !s.settingsOpen })),
-  setSettingsOpen: (v) => set({ settingsOpen: v }),
+  // ── Phase 5 — Dossier (place/topic investigation) ──
+  /**
+   * Country under investigation in the Workbench Dossier tab.
+   * `{ fips, iso, name, lat, lng } | null` — fips is GDELT/Natural Earth
+   * FIPS 10-4 (joins to gdeltCountryAggregates + BigQuery templates).
+   */
+  dossier: null,
+  /** Open the Dossier tab focused on a country (any entry point). */
+  openDossier: (target) => {
+    if (!target || (!target.fips && !target.name)) return
+    set((s) => ({
+      dossier: {
+        fips: target.fips || '',
+        iso: target.iso || '',
+        name: target.name || target.iso || target.fips,
+        lat: Number.isFinite(target.lat) ? target.lat : null,
+        lng: Number.isFinite(target.lng) ? target.lng : null,
+      },
+      ui: { ...s.ui, workbench: 'dossier' },
+    }))
+  },
+  clearDossier: () => set({ dossier: null }),
+
+  // ── Panel coordinator actions ──
+  openWorkbench: (tab) => set((s) => ({ ui: { ...s.ui, workbench: tab } })),
+  closeWorkbench: () => set((s) => ({ ui: { ...s.ui, workbench: null } })),
+  toggleWorkbench: (tab) => set((s) => ({
+    ui: { ...s.ui, workbench: s.ui.workbench === tab ? null : tab },
+  })),
+
+  closeInspector: () => set((s) => {
+    const type = s.ui.inspector?.type
+    return {
+      ui: { ...s.ui, inspector: null },
+      ...(type === 'event' ? { selectedEvent: null } : {}),
+      ...(type === 'news' ? { selectedMarker: null } : {}),
+      ...(type === 'place' ? { searchHighlight: null } : {}),
+    }
+  }),
+
+  /**
+   * Escape handler — closes the top-most open layer only.
+   * Order: modal (YouTube / Street View) → workbench → inspector.
+   * Returns true when something was closed.
+   */
+  closeTopPanel: () => {
+    const s = get()
+    if (s.youtubeEmbed) {
+      set({ youtubeEmbed: null })
+      return true
+    }
+    if (s.isStreetViewOpen) {
+      set({ isStreetViewOpen: false })
+      return true
+    }
+    if (s.ui.workbench) {
+      s.closeWorkbench()
+      return true
+    }
+    if (s.ui.inspector) {
+      s.closeInspector()
+      return true
+    }
+    return false
+  },
 
   setShareCamera: (camera) => set({ shareCamera: camera }),
   setPendingUrlEventId: (id) => set({ pendingUrlEventId: id }),
@@ -451,6 +572,7 @@ export const useAtlasStore = create((set, get) => ({
   // ── EventBus Actions ──
   _eventBusUnsub: null,
   _sourceStatusUnsub: null,
+  _gdeltAggregatesUnsub: null,
 
   initEventBusSystem: () => {
     const state = get()
@@ -459,9 +581,6 @@ export const useAtlasStore = create((set, get) => ({
     initEventBus()
 
     const unsub = subscribeToBatchUpdates((diff) => {
-      // #region agent log
-      try { fetch('http://127.0.0.1:7897/ingest/4068bc9a-6323-4a56-a79a-75d6b868c769',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'894d50'},body:JSON.stringify({sessionId:'894d50',location:'atlasStore.js:batchUpdate',message:'L4 store batch update',data:{snapshot:diff.snapshot?diff.snapshot.length:null,added:diff.added?diff.added.length:0,updated:diff.updated?diff.updated.length:0,removed:diff.removed?diff.removed.length:0},hypothesisId:'H3',timestamp:Date.now()})}).catch(()=>{}) } catch(e){}
-      // #endregion
       set((s) => {
         if (diff.snapshot) {
           const map = {}
@@ -522,15 +641,25 @@ export const useAtlasStore = create((set, get) => ({
       set({ sourceStatuses: statuses })
     })
 
-    set({ eventBusReady: true, _eventBusUnsub: unsub, _sourceStatusUnsub: sourceUnsub })
+    const aggUnsub = subscribeToGdeltAggregates((agg) => {
+      set({ gdeltCountryAggregates: { ...agg, updatedAt: Date.now() } })
+    })
 
-    startFetching()
+    set({
+      eventBusReady: true,
+      _eventBusUnsub: unsub,
+      _sourceStatusUnsub: sourceUnsub,
+      _gdeltAggregatesUnsub: aggUnsub,
+    })
+
+    startFetching(undefined, get().dataLayers)
   },
 
   destroyEventBusSystem: () => {
     const state = get()
     if (state._eventBusUnsub) state._eventBusUnsub()
     if (state._sourceStatusUnsub) state._sourceStatusUnsub()
+    if (state._gdeltAggregatesUnsub) state._gdeltAggregatesUnsub()
     stopFetching()
     destroyEventBus()
     set({
@@ -539,22 +668,36 @@ export const useAtlasStore = create((set, get) => ({
       eventMap: {},
       priorityCounts: { p1: 0, p2: 0, p3: 0 },
       sourceStatuses: {},
+      gdeltCountryAggregates: null,
     })
   },
 
-  setSelectedEvent: (event) => set({ selectedEvent: event }),
+  setSelectedEvent: (event) => set((s) => event
+    ? {
+        selectedEvent: event,
+        selectedMarker: null,
+        ui: { ...s.ui, inspector: { type: 'event', payload: event } },
+      }
+    : {
+        selectedEvent: null,
+        ui: s.ui.inspector?.type === 'event' ? { ...s.ui, inspector: null } : s.ui,
+      }),
 
   openGdeltAnalytics: (payload) => {
     if (!payload || typeof payload.query !== 'string' || !payload.query.trim()) return
-    set({
+    set((s) => ({
       gdeltAnalytics: {
         query: payload.query.trim(),
         label: payload.label || '',
         dimension: payload.dimension || 'narrative',
       },
-    })
+      ui: { ...s.ui, workbench: 'analytics' },
+    }))
   },
-  closeGdeltAnalytics: () => set({ gdeltAnalytics: null }),
+  closeGdeltAnalytics: () => set((s) => ({
+    gdeltAnalytics: null,
+    ui: s.ui.workbench === 'analytics' ? { ...s.ui, workbench: null } : s.ui,
+  })),
   setPriorityFilter: (v) => {
     localStorage.setItem('atlas_priority_filter', v)
     set({ priorityFilter: v })
@@ -565,6 +708,18 @@ export const useAtlasStore = create((set, get) => ({
   },
   setFocusedEventId: (id) => set({ focusedEventId: id }),
   clearFocus: () => set({ focusedEventId: null }),
+
+  // ── Phase 4 — Triage feed ──
+  /** Watchlist-country surge alerts from `useSurgeAlerts` (eventSurge z-scores) */
+  surgeAlerts: [],
+  setSurgeAlerts: (alerts) => set({ surgeAlerts: alerts || [] }),
+  /** Last time the Triage tab was viewed — drives "new since you looked" */
+  triageLastSeenAt: loadTriageSeenAt(),
+  markTriageSeen: () => {
+    const now = Date.now()
+    try { localStorage.setItem(STORAGE_KEY_TRIAGE_SEEN, String(now)) } catch { /* ignore */ }
+    set({ triageLastSeenAt: now })
+  },
 
   toggleDimension: (dimension) => set((s) => {
     const next = new Set(s.activeDimensions)
@@ -585,21 +740,29 @@ export const useAtlasStore = create((set, get) => ({
 
   // ── Data Layer Toggles ──
   toggleDataLayer: (layerId) => {
-    const current = get().dataLayers
-    const next = { ...current, [layerId]: !current[layerId] }
+    const state = get()
+    const current = state.dataLayers
+    const enabling = !isLayerToggleOn(layerId, current)
+    const next = { ...current, [layerId]: enabling }
     if (GIBS_IMAGERY_EXCLUSIVE_KEYS.includes(layerId) && next[layerId]) {
       for (const k of GIBS_IMAGERY_EXCLUSIVE_KEYS) {
         if (k !== layerId) next[k] = false
       }
     }
+    const layerRevealAt = { ...state.layerRevealAt }
+    if (enabling) layerRevealAt[layerId] = Date.now()
     persistDataLayers(next)
-    set({ dataLayers: next })
+    set({ dataLayers: next, layerRevealAt })
+    if (state.eventBusReady) reconcileLayerSources(next)
   },
   setDataLayer: (layerId, enabled) => {
-    const current = get().dataLayers
-    const next = { ...current, [layerId]: enabled }
+    const state = get()
+    const next = { ...state.dataLayers, [layerId]: enabled }
+    const layerRevealAt = { ...state.layerRevealAt }
+    if (enabled) layerRevealAt[layerId] = Date.now()
     persistDataLayers(next)
-    set({ dataLayers: next })
+    set({ dataLayers: next, layerRevealAt })
+    if (state.eventBusReady) reconcileLayerSources(next)
   },
 
   setGdeltGeoBootstrap: (partial) =>

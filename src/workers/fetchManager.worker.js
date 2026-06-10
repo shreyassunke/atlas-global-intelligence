@@ -6,15 +6,38 @@ import { parseTleCatalog } from '../core/satellitePropagation.js'
 import { classifySatellitePurpose } from '../core/satellitePurpose.js'
 import { PRIORITY_FETCH_SOURCES } from '../core/atlasBootstrap.js'
 import { fetchNhcStormsBundle } from '../core/fetchNhcStorms.js'
-
-// #region agent log
-try { fetch('http://127.0.0.1:7897/ingest/4068bc9a-6323-4a56-a79a-75d6b868c769',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'894d50'},body:JSON.stringify({sessionId:'894d50',location:'fetchManager.worker.js:1',message:'L1 worker module loaded',data:{ua:typeof self!=='undefined'?String(self.constructor?.name||''):'?'},hypothesisId:'H1',timestamp:Date.now()})}).catch(()=>{}) } catch(e){}
-// #endregion
+import {
+  saveSnapshot,
+  loadSnapshots,
+  isSnapshotFresh,
+  LIVE_TRACK_SOURCES,
+} from '../core/snapshotCache.js'
+import { getActivePollSourceIds } from '../core/layerSources.js'
 
 const INITIAL_BACKOFF = 5000
 const MAX_BACKOFF = 300_000
+const LIVE_TRACK_MAX_AGE_MS = 10 * 60 * 1000
+
+/** L2 Supabase-eligible sources (slow/medium feeds). */
+const L2_SOURCES = new Set([
+  'usgs', 'gdacs', 'eonet', 'firms', 'noaa-nhc', 'celestrak-tle', 'gdelt-cameo',
+])
+
+const L2_TTL_MS = {
+  usgs: 86_400_000,
+  gdacs: 86_400_000,
+  eonet: 86_400_000,
+  firms: 86_400_000,
+  'noaa-nhc': 86_400_000,
+  'celestrak-tle': 172_800_000,
+  'gdelt-cameo': 1_800_000,
+}
 
 const moduleState = {}
+/** @type {Record<string, { events: object[], aggregates?: object, fetchedAt: number }>} */
+const lastGoodPayload = {}
+/** @type {Set<string>} */
+let activePollSources = new Set()
 let envKeys = {}
 
 function getState(moduleId) {
@@ -253,15 +276,15 @@ const GDELT_GEO_DIM_QUERIES = [
 ]
 
 /**
- * DOC ArtList chain — multiple OR-block legs (not one giant query: GDELT returns
- * an error page for URLs that are too long).
+ * DOC ArtList chain — one leg per ATLAS dimension (not one giant query: GDELT
+ * returns an error page for URLs that are too long).
  *
- * This is still **not** “all of GDELT”: there is no supported single query that
- * streams the full firehose through the DOC API. The GEO PointData chain
- * (`gdeltGeoChain` / `NORMALIZERS['gdelt-events']`) would add true lat/lng points,
- * but `api/v2/geo/geo` has returned HTTP 404 for this project since 2024+ so
- * that source stays unregistered. Ingest today = DOC legs below + `gdelt-cameo`
- * (15‑min Events export) + `gdelt-vgkg` (sparse visual GKG samples).
+ * Phase 1b: trimmed from 8 legs to the 6 dimension-scoped legs. DOC articles
+ * are country-centroid geocodes and never pin on the globe — they feed the
+ * ticker/feed and Dossier evidence, so the "wider net" legs only burned the
+ * shared GDELT rate-limit budget. Ingest today = DOC legs below +
+ * `gdelt-cameo` (15-min Events export) + `gdelt-vgkg` (sparse visual GKG
+ * samples, panel-only).
  */
 const GDELT_DOC_DIM_QUERIES = [
   { query: '(conflict OR war OR military OR terror OR attack OR violence OR protest)', dimension: 'safety' },
@@ -270,14 +293,56 @@ const GDELT_DOC_DIM_QUERIES = [
   { query: '(humanitarian OR migration OR refugee OR health OR disease OR hospital OR hunger OR strike OR labor)', dimension: 'people' },
   { query: '(climate OR environment OR pollution OR wildfire OR flood OR storm OR earthquake OR disaster OR renewable)', dimension: 'environment' },
   { query: '(media OR censorship OR journalist OR press OR disinformation OR narrative OR broadcast)', dimension: 'narrative' },
-  // Wider nets — themes underrepresented in the six blocks above (still keyword-filtered).
-  { query: '(cyber OR ransomware OR data breach OR critical infrastructure OR nuclear OR space OR maritime OR aviation OR border OR drone)', dimension: 'safety' },
-  { query: '(education OR university OR research OR culture OR religion OR sport OR technology OR semiconductor OR supply chain OR agriculture)', dimension: 'narrative' },
 ]
 
 const GDELT_DOC_BASE = 'https://api.gdeltproject.org/api/v2/doc/doc'
 /** Per-leg AbortController timeout for GDELT DOC/GEO chain legs. */
 const GDELT_LEG_TIMEOUT_MS = 20_000
+
+// ── Phase 1b: CAMEO → two products (pins + country aggregates) ──
+
+/** Pin gate: a CAMEO row pins only when multiple independent sources OR high severity. */
+const GDELT_PIN_MIN_SOURCES = 3
+const GDELT_PIN_MIN_SEVERITY = 4
+
+function cameoRowIsPinWorthy(row) {
+  return (row.numSources || 0) >= GDELT_PIN_MIN_SOURCES
+    || (row.severity || 1) >= GDELT_PIN_MIN_SEVERITY
+}
+
+/**
+ * Reduce ALL parsed CAMEO rows (not just pin-worthy ones) to per-country
+ * aggregates keyed by FIPS 10-4 (`ActionGeo_CountryCode`, which joins
+ * directly to Natural Earth `FIPS_10`). Feeds the choropleth without extra
+ * GEO API calls, and the Triage surge baseline (Phase 4).
+ * @returns {Record<string, { events: number, avgTone: number, avgGoldstein: number, quad: Record<1|2|3|4, number> }>}
+ */
+function buildCameoCountryAggregates(rows) {
+  const sums = {}
+  for (const row of rows) {
+    const fips = row.countryCode
+    if (!fips || fips === '-99') continue
+    let s = sums[fips]
+    if (!s) {
+      s = { events: 0, toneSum: 0, goldsteinSum: 0, quad: { 1: 0, 2: 0, 3: 0, 4: 0 } }
+      sums[fips] = s
+    }
+    s.events++
+    if (Number.isFinite(row.toneScore)) s.toneSum += row.toneScore
+    if (Number.isFinite(row.goldstein)) s.goldsteinSum += row.goldstein
+    if (s.quad[row.quadClass] != null) s.quad[row.quadClass]++
+  }
+  const out = {}
+  for (const [fips, s] of Object.entries(sums)) {
+    out[fips] = {
+      events: s.events,
+      avgTone: s.toneSum / s.events,
+      avgGoldstein: s.goldsteinSum / s.events,
+      quad: s.quad,
+    }
+  }
+  return out
+}
 
 // ══════════════════════════════════════════════════════════════
 //  NORMALIZERS — one per source ID
@@ -1295,8 +1360,9 @@ const SOURCE_CONFIGS = {
     url: 'https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minmagnitude=4.5&orderby=time&limit=50',
     format: 'json', pollInterval: 120_000,
   },
+  // GDACS serves no CORS headers — fetched via same-origin proxy
   gdacs: {
-    url: 'https://www.gdacs.org/xml/rss.xml',
+    url: '/api/gdacs-rss',
     format: 'text', pollInterval: 300_000,
   },
   eonet: {
@@ -1425,9 +1491,10 @@ function buildKeyedConfigs() {
     }
   }
 
-  if (envKeys.FIRMS_KEY) {
+  const firmsKey = envKeys.FIRMS_MAP_KEY || envKeys.FIRMS_KEY
+  if (firmsKey) {
     keyed.firms = {
-      url: `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${envKeys.FIRMS_KEY}/VIIRS_SNPP_NRT/world/1`,
+      url: `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${firmsKey}/VIIRS_SNPP_NRT/world/1`,
       format: 'text', pollInterval: 600_000,
     }
   }
@@ -1504,6 +1571,155 @@ function getAllConfigs() {
   return { ...SOURCE_CONFIGS, ...keyed }
 }
 
+function ttlForSource(sourceId) {
+  return L2_TTL_MS[sourceId] || 3_600_000
+}
+
+function tagStaleEvents(events, stale) {
+  if (!stale) return events
+  return events.map((e) => ({ ...e, cacheStale: true }))
+}
+
+function emitCachedSnapshot(sourceId, row, stale = true) {
+  const events = tagStaleEvents(row.events || [], stale)
+  if (!events.length && !row.aggregates) return
+
+  lastGoodPayload[sourceId] = {
+    events: row.events || [],
+    aggregates: row.aggregates,
+    fetchedAt: row.fetchedAt || Date.now(),
+  }
+
+  if (events.length) {
+    self.postMessage({ type: 'EVENTS', sourceId, events, fromCache: true })
+  }
+
+  if (sourceId === 'gdelt-cameo' && row.aggregates) {
+    self.postMessage({
+      type: 'GDELT_COUNTRY_AGGREGATES',
+      aggregates: row.aggregates,
+      exportTsMs: row.fetchedAt || Date.now(),
+      totalRows: row.totalRows || 0,
+      fromCache: true,
+    })
+  }
+
+  const state = getState(sourceId)
+  state.lastFetch = row.fetchedAt || Date.now()
+  self.postMessage({
+    type: 'SOURCE_STATUS',
+    sourceId,
+    status: stale ? 'stale' : 'connected',
+    lastFetch: state.lastFetch,
+    eventCount: events.length,
+    warning: stale ? 'Showing cached data — refreshing' : undefined,
+  })
+}
+
+async function persistSnapshot(sourceId, events, extras = {}) {
+  const fetchedAt = Date.now()
+  const entry = {
+    events,
+    aggregates: extras.aggregates || null,
+    totalRows: extras.totalRows || 0,
+    fetchedAt,
+    expiresAt: fetchedAt + ttlForSource(sourceId),
+    stale: false,
+  }
+  await saveSnapshot(sourceId, entry)
+  lastGoodPayload[sourceId] = {
+    events,
+    aggregates: extras.aggregates,
+    fetchedAt,
+  }
+}
+
+function postSnapshotToL2(sourceId, events, extras = {}) {
+  if (!L2_SOURCES.has(sourceId) || !events?.length) return
+  void fetch('/api/feed-snapshots', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      sourceId,
+      payload: { events, aggregates: extras.aggregates || null },
+      eventCount: events.length,
+      status: 'fresh',
+    }),
+  }).catch(() => {})
+}
+
+async function hydrateFromCache(sourceIds) {
+  const local = await loadSnapshots(sourceIds)
+  const now = Date.now()
+  const needL2 = []
+
+  for (const id of sourceIds) {
+    const row = local[id]
+    if (!row?.events?.length && !row?.aggregates) {
+      if (L2_SOURCES.has(id)) needL2.push(id)
+      continue
+    }
+    const fresh = isSnapshotFresh(row, now)
+    const liveOk = !LIVE_TRACK_SOURCES.has(id) || (now - (row.fetchedAt || 0) < LIVE_TRACK_MAX_AGE_MS)
+    if (fresh || liveOk) {
+      emitCachedSnapshot(id, row, !fresh)
+    } else if (L2_SOURCES.has(id)) {
+      needL2.push(id)
+    }
+  }
+
+  for (const id of sourceIds) {
+    if (!local[id] && L2_SOURCES.has(id) && !needL2.includes(id)) needL2.push(id)
+  }
+
+  if (!needL2.length) return
+
+  try {
+    const res = await fetch(`/api/feed-snapshots?sources=${needL2.join(',')}`)
+    if (!res.ok) return
+    const { snapshots } = await res.json()
+    for (const id of needL2) {
+      const snap = snapshots?.[id]
+      if (!snap?.payload) continue
+      const events = snap.payload.events || []
+      const row = {
+        events,
+        aggregates: snap.payload.aggregates,
+        fetchedAt: snap.fetchedAt || Date.now(),
+        totalRows: snap.payload.totalRows || 0,
+      }
+      await saveSnapshot(id, {
+        ...row,
+        expiresAt: snap.expiresAt || row.fetchedAt + ttlForSource(id),
+        stale: snap.status === 'stale',
+      })
+      if (events.length || row.aggregates) {
+        emitCachedSnapshot(id, row, true)
+      }
+    }
+  } catch {
+    /* L2 hydrate is best-effort */
+  }
+}
+
+function startPollingSources(sourceIds) {
+  const allConfigs = getAllConfigs()
+  const prioritySet = new Set(PRIORITY_FETCH_SOURCES)
+  const priority = PRIORITY_FETCH_SOURCES.filter((id) => sourceIds.includes(id))
+  const rest = sourceIds.filter((id) => !prioritySet.has(id))
+
+  for (const id of priority) {
+    if (allConfigs[id]) pollSource(id)
+  }
+
+  let delay = 1500
+  for (const id of rest) {
+    if (!allConfigs[id]) continue
+    setTimeout(() => pollSource(id), delay)
+    delay += 350
+  }
+}
+
 async function fetchSource(sourceId) {
   const allConfigs = getAllConfigs()
   const config = allConfigs[sourceId]
@@ -1574,7 +1790,23 @@ async function fetchSource(sourceId) {
   if (sourceId === 'gdelt-cameo') {
     try {
       const rows = await fetchGdeltCameoEvents()
-      const events = rows.map((row) => {
+
+      // Product 1 — country aggregates from the FULL row set (choropleth +
+      // surge baselines). Posted as a dedicated message, not globe events.
+      const aggregates = buildCameoCountryAggregates(rows)
+      state.lastAggregates = aggregates
+      state.lastTotalRows = rows.length
+      if (Object.keys(aggregates).length > 0) {
+        self.postMessage({
+          type: 'GDELT_COUNTRY_AGGREGATES',
+          aggregates,
+          exportTsMs: rows[0]?._exportTsMs ?? Date.now(),
+          totalRows: rows.length,
+        })
+      }
+
+      // Product 2 — pins: only high-confidence rows (multi-source OR severe).
+      const events = rows.filter(cameoRowIsPinWorthy).map((row) => {
         const ts = typeof row._exportTsMs === 'number' && Number.isFinite(row._exportTsMs)
           ? row._exportTsMs
           : Date.now()
@@ -1600,11 +1832,11 @@ async function fetchSource(sourceId) {
           actor2: row.actor2,
           locationName: row.locationName,
           timestamp: new Date(ts).toISOString(),
-          // Keep CAMEO rows alive for 2 hours — matches the "Live" HUD window
-          // (`TIME_FILTER_MAX_AGE_MS.live`) so the globe always shows a dense,
-          // rolling two-hour backlog of geocoded events across 8 consecutive
-          // 15-minute polls. Older rows are culled either by TTL here or by
-          // the globe's own age filter.
+          // Keep CAMEO pins alive for 2 hours — matches the "Live" HUD window
+          // (`TIME_FILTER_MAX_AGE_MS.live`). Applies to the reduced
+          // high-confidence pin set (≈100-300/tick) across 8 consecutive
+          // 15-minute polls; older rows are culled by TTL here or by the
+          // globe's own age filter.
           ttl: 7200,
         })
       })
@@ -1877,6 +2109,7 @@ async function pollSource(sourceId) {
   const allConfigs = getAllConfigs()
   const config = allConfigs[sourceId]
   if (!config) return
+  if (activePollSources.size && !activePollSources.has(sourceId)) return
 
   const state = getState(sourceId)
   if (state.active) return
@@ -1887,17 +2120,31 @@ async function pollSource(sourceId) {
     sourceId,
     status: 'fetching',
     lastFetch: state.lastFetch || 0,
-    eventCount: 0,
+    eventCount: lastGoodPayload[sourceId]?.events?.length || 0,
   })
 
-  const events = await fetchSource(sourceId)
-
-  // #region agent log
-  try { fetch('http://127.0.0.1:7897/ingest/4068bc9a-6323-4a56-a79a-75d6b868c769',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'894d50'},body:JSON.stringify({sessionId:'894d50',location:'fetchManager.worker.js:pollSource',message:'L2 pollSource fetch complete',data:{sourceId,count:events.length,errorCount:state.errorCount,lastError:state.lastError?String(state.lastError).slice(0,200):null,firstEvent:events[0]?{id:events[0].id,source:events[0].source,dim:events[0].dimension,lat:events[0].lat,lng:events[0].lng}:null},hypothesisId:'H2',timestamp:Date.now()})}).catch(()=>{}) } catch(e){}
-  // #endregion
+  let events = await fetchSource(sourceId)
+  let servedStale = false
 
   if (events.length > 0) {
+    const extras = state.lastAggregates
+      ? { aggregates: state.lastAggregates, totalRows: state.lastTotalRows || 0 }
+      : {}
+    await persistSnapshot(sourceId, events, extras)
+    postSnapshotToL2(sourceId, events, extras)
+    if (sourceId === 'gdelt-cameo' && extras.aggregates) {
+      state.lastAggregates = null
+      state.lastTotalRows = 0
+    }
     self.postMessage({ type: 'EVENTS', sourceId, events })
+  } else if (lastGoodPayload[sourceId]?.events?.length) {
+    const age = Date.now() - (lastGoodPayload[sourceId].fetchedAt || 0)
+    const canStale = !LIVE_TRACK_SOURCES.has(sourceId) || age < LIVE_TRACK_MAX_AGE_MS
+    if (canStale) {
+      events = tagStaleEvents(lastGoodPayload[sourceId].events, true)
+      servedStale = true
+      self.postMessage({ type: 'EVENTS', sourceId, events, fromCache: true })
+    }
   }
 
   const transientRateLimit =
@@ -1905,22 +2152,32 @@ async function pollSource(sourceId) {
     state.lastError?.includes('502') ||
     state.lastError?.includes('503')
 
+  let status = 'connected'
+  if (servedStale) {
+    status = 'stale'
+  } else if (state.errorCount > 0) {
+    status = transientRateLimit ? 'partial' : 'error'
+  } else if (state.lastWarning) {
+    status = 'partial'
+  }
+
   self.postMessage({
     type: 'SOURCE_STATUS',
     sourceId,
-    status:
-      state.errorCount === 0
-        ? (state.lastWarning ? 'partial' : 'connected')
-        : transientRateLimit
-          ? 'partial'
-          : 'error',
-    lastFetch: state.lastFetch,
+    status,
+    lastFetch: state.lastFetch || lastGoodPayload[sourceId]?.fetchedAt || 0,
     eventCount: events.length,
-    warning: state.lastWarning || (transientRateLimit ? state.lastError : undefined) || undefined,
-    error: state.errorCount > 0 && !transientRateLimit ? state.lastError || 'fetch failed' : undefined,
+    warning: servedStale
+      ? 'Showing cached data — retrying'
+      : state.lastWarning || (transientRateLimit ? state.lastError : undefined) || undefined,
+    error: state.errorCount > 0 && !transientRateLimit && !servedStale
+      ? state.lastError || 'fetch failed'
+      : undefined,
   })
 
   state.active = false
+
+  if (!activePollSources.has(sourceId) && activePollSources.size) return
 
   const interval =
     sourceId === 'opensky' && state.errorCount > 0
@@ -1942,29 +2199,52 @@ self.onmessage = function (msg) {
       break
     case 'START_ALL': {
       const allConfigs = getAllConfigs()
-      const allIds = payload?.sourceIds || Object.keys(allConfigs)
-      const prioritySet = new Set(PRIORITY_FETCH_SOURCES)
-      const priority = PRIORITY_FETCH_SOURCES.filter((id) => allIds.includes(id))
-      const rest = allIds.filter((id) => !prioritySet.has(id))
-
-      for (const id of priority) {
-        if (allConfigs[id]) pollSource(id)
+      const allConfiguredIds = Object.keys(allConfigs)
+      const targetIds = payload?.sourceIds
+        || getActivePollSourceIds(payload?.dataLayers || {}, allConfiguredIds)
+      activePollSources = new Set(targetIds)
+      void (async () => {
+        await hydrateFromCache(targetIds)
+        startPollingSources(targetIds)
+      })()
+      break
+    }
+    case 'RECONCILE_SOURCES': {
+      const allConfigs = getAllConfigs()
+      const allConfiguredIds = Object.keys(allConfigs)
+      const nextIds = payload?.sourceIds
+        || getActivePollSourceIds(payload?.dataLayers || {}, allConfiguredIds)
+      const nextSet = new Set(nextIds)
+      for (const id of [...activePollSources]) {
+        if (!nextSet.has(id)) {
+          const st = getState(id)
+          if (st.timer) clearTimeout(st.timer)
+          st.timer = null
+          st.active = false
+        }
       }
-
-      let delay = 1500
-      for (const id of rest) {
+      activePollSources = nextSet
+      for (const id of nextIds) {
         if (!allConfigs[id]) continue
-        setTimeout(() => pollSource(id), delay)
-        delay += 350
+        const st = getState(id)
+        if (!st.timer && !st.active) pollSource(id)
       }
       break
     }
-    case 'START_SOURCE':
-      pollSource(payload.sourceId)
+    case 'START_SOURCE': {
+      const sourceId = payload.sourceId
+      activePollSources.add(sourceId)
+      void (async () => {
+        await hydrateFromCache([sourceId])
+        pollSource(sourceId)
+      })()
       break
+    }
     case 'STOP_SOURCE': {
+      activePollSources.delete(payload.sourceId)
       const state = getState(payload.sourceId)
       if (state.timer) clearTimeout(state.timer)
+      state.timer = null
       state.active = false
       break
     }

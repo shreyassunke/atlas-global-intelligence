@@ -2,6 +2,7 @@ let eventBusWorker = null
 let fetchWorker = null
 let subscribers = new Set()
 let sourceStatusSubscribers = new Set()
+let gdeltAggregateSubscribers = new Set()
 let sourceStatuses = {}
 
 /**
@@ -71,9 +72,6 @@ export function initEventBus() {
 
     if (type === 'EVENTS') {
       const events = msg.data.events || []
-      // #region agent log
-      try { fetch('http://127.0.0.1:7897/ingest/4068bc9a-6323-4a56-a79a-75d6b868c769',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'894d50'},body:JSON.stringify({sessionId:'894d50',location:'eventBus.js:EVENTS',message:'L3 fetchWorker EVENTS received',data:{sourceId:msg.data.sourceId,count:events.length,firstSource:events[0]?.source||null,firstDim:events[0]?.dimension||null},hypothesisId:'H3',timestamp:Date.now()})}).catch(()=>{}) } catch(e){}
-      // #endregion
       if (DEV_BREADCRUMBS && events.length) {
         for (const evt of events) logBreadcrumb(evt)
       }
@@ -81,6 +79,21 @@ export function initEventBus() {
         type: 'INGEST',
         payload: { events },
       })
+    }
+
+    if (type === 'GDELT_COUNTRY_AGGREGATES') {
+      const payload = {
+        byFips: msg.data.aggregates || {},
+        exportTsMs: msg.data.exportTsMs || Date.now(),
+        totalRows: msg.data.totalRows || 0,
+      }
+      if (DEV_BREADCRUMBS) {
+        // eslint-disable-next-line no-console
+        console.info(
+          `[eventBus] gdelt country aggregates → ${Object.keys(payload.byFips).length} countries from ${payload.totalRows} rows`,
+        )
+      }
+      for (const fn of gdeltAggregateSubscribers) fn(payload)
     }
 
     if (type === 'SOURCE_STATUS') {
@@ -121,7 +134,7 @@ export function initEventBus() {
   eventBusWorker.postMessage({ type: 'START' })
 }
 
-export function startFetching(sourceIds) {
+export function startFetching(sourceIds, dataLayers) {
   if (!fetchWorker) return
 
   const envKeys = {}
@@ -133,7 +146,21 @@ export function startFetching(sourceIds) {
   }
 
   fetchWorker.postMessage({ type: 'SET_ENV', payload: { envKeys } })
-  fetchWorker.postMessage({ type: 'START_ALL', payload: { sourceIds } })
+  fetchWorker.postMessage({ type: 'START_ALL', payload: { sourceIds, dataLayers } })
+}
+
+export function startSource(sourceId) {
+  if (fetchWorker) fetchWorker.postMessage({ type: 'START_SOURCE', payload: { sourceId } })
+}
+
+export function stopSource(sourceId) {
+  if (fetchWorker) fetchWorker.postMessage({ type: 'STOP_SOURCE', payload: { sourceId } })
+}
+
+/** Start/stop worker polls to match enabled data layers + ticker sources. */
+export function reconcileLayerSources(dataLayers) {
+  if (!fetchWorker) return
+  fetchWorker.postMessage({ type: 'RECONCILE_SOURCES', payload: { dataLayers } })
 }
 
 export function stopFetching() {
@@ -148,6 +175,12 @@ export function subscribeToBatchUpdates(fn) {
 export function subscribeToSourceStatus(fn) {
   sourceStatusSubscribers.add(fn)
   return () => sourceStatusSubscribers.delete(fn)
+}
+
+/** Per-country CAMEO aggregates from the latest 15-min export (choropleth + surge baseline). */
+export function subscribeToGdeltAggregates(fn) {
+  gdeltAggregateSubscribers.add(fn)
+  return () => gdeltAggregateSubscribers.delete(fn)
 }
 
 export function requestSnapshot() {
@@ -167,5 +200,6 @@ export function destroyEventBus() {
   if (fetchWorker) { fetchWorker.terminate(); fetchWorker = null }
   subscribers.clear()
   sourceStatusSubscribers.clear()
+  gdeltAggregateSubscribers.clear()
   sourceStatuses = {}
 }

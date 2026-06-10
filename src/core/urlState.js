@@ -17,13 +17,13 @@ const GLOBE_MODES = ['cesium', 'globegl', 'leaflet']
  * @type {Record<string, boolean>}
  */
 export const URL_LAYER_DEFAULTS = {
-  gdelt: true,
+  gdeltSignals: true,
   firms: true,
   usgs: true,
   gdacs: true,
   eonet: true,
   gdeltHeatmap: false,
-  gdeltChoropleth: false,
+  gdeltChoropleth: true,
   gibsTrueColor: false,
   gibsFires: false,
   gibsAerosol: false,
@@ -31,7 +31,7 @@ export const URL_LAYER_DEFAULTS = {
   gibsClouds: false,
   gibsBlackMarble: false,
   terminator: true,
-  adsb: true,
+  adsb: false,
   adsbMilitary: true,
   satellites: false,
   ais: false,
@@ -130,6 +130,11 @@ export function serializeAtlasUrlState(state) {
     params.set('evt', state.selectedEventId)
   }
 
+  // Phase 5 — Dossier deep link (ISO2 / FIPS / country name)
+  if (state.dossierCode) {
+    params.set('dossier', state.dossierCode)
+  }
+
   return params
 }
 
@@ -182,6 +187,11 @@ export function deserializeAtlasUrlState(searchParams, baseLayers = URL_LAYER_DE
 
   if (params.has('evt')) {
     out.selectedEventId = params.get('evt')
+  }
+
+  if (params.has('dossier')) {
+    const code = params.get('dossier').trim()
+    if (code) out.dossierCode = code.slice(0, 64)
   }
 
   // Legacy dimension-only URLs still work via deserializeFilters

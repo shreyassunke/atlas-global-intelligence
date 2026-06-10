@@ -19,17 +19,18 @@ export const GDELT_DOC_BASE = 'https://api.gdeltproject.org/api/v2/doc/doc'
 // Re-exports for backwards compatibility with existing callers.
 export { DIMENSION_GDELT_QUERIES, buildGdeltDocQuery, formatGdeltDateTick, timespanFromTimeFilter }
 
-function buildDocUrl(query, mode, timespan) {
+function buildDocUrl(query, mode, timespan, extraParams = {}) {
   return buildGdeltUrl(GDELT_DOC_BASE, {
     query: String(query || '').trim(),
     mode,
     format: 'json',
     timespan,
+    ...extraParams,
   })
 }
 
-function fetchDocJson(query, mode, timespan, opts) {
-  return fetchGdeltJson(buildDocUrl(query, mode, timespan), opts)
+function fetchDocJson(query, mode, timespan, opts, extraParams) {
+  return fetchGdeltJson(buildDocUrl(query, mode, timespan, extraParams), opts)
 }
 
 /** GDELT timeline JSON: `{ timeline: [{ series, data: [{ date, value, norm? }] }] }` */
@@ -93,6 +94,38 @@ function parseWordCloudJson(json) {
     .filter(Boolean)
     .sort((a, b) => b.weight - a.weight)
     .slice(0, 48)
+}
+
+/** GDELT DOC ArtList JSON: `{ articles: [{ title, url, domain, seendate, ... }] }` */
+function parseArticleListJson(json) {
+  const rows = [json?.articles, json?.Articles, json?.results].find((x) => Array.isArray(x)) || []
+  return rows
+    .map((row) => {
+      if (typeof row !== 'object' || row === null) return null
+      const url = row.url ?? row.URL ?? row.documentIdentifier ?? ''
+      if (!url) return null
+      return {
+        title: String(row.title ?? row.Title ?? url),
+        url: String(url),
+        domain: String(row.domain ?? row.Domain ?? row.sourceCommonName ?? ''),
+        seendate: String(row.seendate ?? row.date ?? row.Date ?? ''),
+        sourcecountry: String(row.sourcecountry ?? row.sourceCountry ?? ''),
+        language: String(row.language ?? row.Lang ?? ''),
+        socialimage: String(row.socialimage ?? row.socialImage ?? ''),
+      }
+    })
+    .filter(Boolean)
+}
+
+/**
+ * Phase 5 — DOC article list (mode=artlist) for Dossier evidence sections.
+ */
+export async function fetchDocArticles(query, timespan, { maxrecords = 12, signal } = {}) {
+  const json = await fetchDocJson(query, 'artlist', timespan, { signal }, {
+    maxrecords: Math.max(1, Math.min(75, Number(maxrecords) || 12)),
+    sort: 'hybridrel',
+  })
+  return parseArticleListJson(json).slice(0, maxrecords)
 }
 
 export async function fetchTimelineVol(query, timespan, opts) {

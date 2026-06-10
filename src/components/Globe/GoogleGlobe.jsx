@@ -22,13 +22,8 @@ import { useAtlasStore } from '../../store/atlasStore'
 import { requestSnapshot } from '../../core/eventBus'
 import { getTimezoneViewCenter } from '../../utils/geo'
 import { detectQualityTier } from '../../config/qualityTiers'
-import { DIMENSION_COLORS } from '../../core/eventSchema'
-import { generateSprite, getAnimationState, getSeveritySize } from '../../core/visualGrammar'
-import {
-  NUCLEAR_FACILITIES,
-  clusterEvents,
-  detectClusterToneDisagreement,
-} from '../../core/globeLayers'
+import { generateSprite } from '../../core/visualGrammar'
+import { NUCLEAR_FACILITIES } from '../../core/globeLayers'
 import {
   bucketCameraRangeM,
   computeOrbitArc,
@@ -37,11 +32,16 @@ import {
 } from '../../core/satellitePropagation'
 import { showDetectionLabel as getDetectionLabel } from '../../core/detectionLabels'
 import { aircraftSpriteDataUrl, satelliteSpriteDataUrl, vesselSpriteDataUrl } from '../../core/tacticalSprites'
-import useGlobeLayerEvents from '../../hooks/useGlobeLayerEvents'
+import {
+  useGlobeViewModels,
+  applyMarkerClick,
+  applyBackgroundClick,
+  applyMarkerHover,
+  resolveFlyToTarget,
+  geoJsonToOuterRings,
+} from '../../globe-core'
 import { buildGdeltDocQuery } from '../../services/gdelt/analyticsService'
-import useGdeltGeoOverlay from '../../hooks/useGdeltGeoOverlay'
 import useShareCameraBridge from '../../hooks/useShareCameraBridge'
-import { toneToChoroplethRgba } from '../../services/gdelt/geoService'
 import { PLACE_SEARCH_PIN_SRC } from '../../constants/placeSearchPin'
 import { buildTerminatorRing } from '../../core/solarTerminator'
 
@@ -59,35 +59,6 @@ const INTRO_DURATION_MS = 3000
 const STARTUP_ORBIT_TILT = 0
 /** Fly-to / search framing: classic Google Earth nadir (north-up, perpendicular to terrain). */
 const FLY_TO_NADIR_TILT = 0
-
-/**
- * Hard cap on the number of individual `<Marker3D>` elements we mount at
- * once. With the GDELT firehose unleashed we can have 5-10k geocoded events
- * in-memory; Map3D handles overlap via `OPTIONAL_AND_HIDES_LOWER_PRIORITY`
- * but still pays a per-marker DOM cost. 2.5k is a good balance on the
- * modern browsers we target: dense enough to feel "populated" everywhere
- * there's news, cheap enough to keep the 60fps camera path responsive.
- * When the pool exceeds the cap we keep the highest-severity, most-recent
- * events (see `rankForGlobeRender`).
- */
-const MAX_CLUSTER_INPUTS = 2000
-
-function convexHull(points) {
-  if (points.length < 3) return points
-  const sorted = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1])
-  const cross = (O, A, B) => (A[0] - O[0]) * (B[1] - O[1]) - (A[1] - O[1]) * (B[0] - O[0])
-  const lower = []
-  for (const p of sorted) {
-    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop()
-    lower.push(p)
-  }
-  const upper = []
-  for (const p of sorted.reverse()) {
-    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop()
-    upper.push(p)
-  }
-  return [...lower.slice(0, -1), ...upper.slice(0, -1)]
-}
 
 function readMap3dCenterLiteral(center) {
   if (!center) return null
@@ -192,51 +163,6 @@ function heatSpriteDataUrl(alphaBin) {
   return url
 }
 
-/** Bin heatmap points into ~1.5° cells so the 3D globe renders ≤400 markers. */
-function bucketHeatPoints(points, cellDeg = 1.5) {
-  if (!Array.isArray(points) || points.length === 0) return []
-  const bins = new Map()
-  for (const p of points) {
-    if (!Number.isFinite(p.lat) || !Number.isFinite(p.lng)) continue
-    const ix = Math.round(p.lat / cellDeg)
-    const iy = Math.round(p.lng / cellDeg)
-    const k = `${ix}|${iy}`
-    const prev = bins.get(k)
-    if (prev) {
-      prev.w += p.weight || 1
-      prev.n += 1
-    } else {
-      bins.set(k, { lat: ix * cellDeg, lng: iy * cellDeg, w: p.weight || 1, n: 1 })
-    }
-  }
-  const out = [...bins.values()]
-  let max = 0
-  for (const b of out) if (b.w > max) max = b.w
-  for (const b of out) b.norm = max > 0 ? b.w / max : 0
-  out.sort((a, b) => b.w - a.w)
-  return out.slice(0, 400)
-}
-
-/** Flatten GeoJSON Polygon / MultiPolygon geometry to an array of outer rings for Map3D. */
-function geoJsonToOuterRings(geometry) {
-  if (!geometry) return []
-  const rings = []
-  if (geometry.type === 'Polygon' && Array.isArray(geometry.coordinates)) {
-    if (geometry.coordinates[0]) rings.push(geometry.coordinates[0])
-  } else if (geometry.type === 'MultiPolygon' && Array.isArray(geometry.coordinates)) {
-    for (const poly of geometry.coordinates) {
-      if (poly && poly[0]) rings.push(poly[0])
-    }
-  }
-  return rings
-    .map((ring) =>
-      ring
-        .filter((pair) => Array.isArray(pair) && pair.length >= 2 && Number.isFinite(pair[0]) && Number.isFinite(pair[1]))
-        .map(([lng, lat]) => ({ lat, lng, altitude: 0 })),
-    )
-    .filter((ring) => ring.length >= 3)
-}
-
 function truncatePlaceLabel(s, maxLen = 72) {
   if (!s || typeof s !== 'string') return ''
   const t = s.trim()
@@ -292,17 +218,6 @@ function literalLatLng(pos) {
   const lng = typeof pos.lng === 'function' ? pos.lng() : pos.lng
   if (typeof lat !== 'number' || typeof lng !== 'number') return null
   return { lat, lng }
-}
-
-function rgbaFromHex(hex, alpha) {
-  let h = (hex || '#888888').replace('#', '')
-  if (h.length === 3) {
-    h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2]
-  }
-  const r = parseInt(h.slice(0, 2), 16)
-  const g = parseInt(h.slice(2, 4), 16)
-  const b = parseInt(h.slice(4, 6), 16)
-  return `rgba(${r},${g},${b},${alpha})`
 }
 
 class AtlasGlobeErrorBoundary extends Component {
@@ -380,9 +295,6 @@ function InnerMap({ onGlobeReady }) {
   const spriteCacheRef = useRef(new Map())
 
   const setZoomLevel = useAtlasStore((s) => s.setZoomLevel)
-  const setSelectedMarker = useAtlasStore((s) => s.setSelectedMarker)
-  const setSelectedEvent = useAtlasStore((s) => s.setSelectedEvent)
-  const setHoveredMarker = useAtlasStore((s) => s.setHoveredMarker)
   const openStreetView = useAtlasStore((s) => s.openStreetView)
 
   const dataLayers = useAtlasStore((s) => s.dataLayers)
@@ -398,13 +310,22 @@ function InnerMap({ onGlobeReady }) {
   const qualityOverrides = useAtlasStore((s) => s.qualityOverrides)
 
   const {
-    globePlottedEvents,
-    tacticalAircraft,
-    tacticalVessels,
-    tacticalSatellites,
+    eventMarkers,
+    aircraftMarkers,
+    vesselMarkers,
+    satelliteMarkers,
+    clusters,
+    choropleth,
+    heatBins: heatBuckets,
     stormOverlays,
     propagationTick,
-  } = useGlobeLayerEvents()
+  } = useGlobeViewModels({ withClusters: true, withHeatBins: true })
+
+  /** Raw propagated satellites (orbit arcs need TLE lines + live positions). */
+  const tacticalSatellites = useMemo(
+    () => satelliteMarkers.map((vm) => vm.raw),
+    [satelliteMarkers],
+  )
 
   const selectedOrbitTrack = useMemo(() => {
     if (selectedEvent?.trackKind !== 'satellite' || !selectedEvent?.tleLine1 || !selectedEvent?.tleLine2) return null
@@ -430,34 +351,14 @@ function InnerMap({ onGlobeReady }) {
     selectedEventId: selectedEvent?.id,
   }), [detectionMode, detectionLabelDensity, selectedEvent?.id])
 
-  const clusterLayers = useMemo(() => {
-    // Cap the clusterer input so the O(n²) pass stays bounded when the
-    // worker has delivered a particularly rich export. The ranking already
-    // front-loads the freshest/most-severe events, so a head-slice is a
-    // faithful approximation of the dense pool.
-    const clusterInput = globePlottedEvents.length > MAX_CLUSTER_INPUTS
-      ? globePlottedEvents.slice(0, MAX_CLUSTER_INPUTS)
-      : globePlottedEvents
-    const clusters = clusterEvents(clusterInput, 200, 5)
-    return clusters.map((cluster) => {
-      const dimensionColor = DIMENSION_COLORS[cluster.dimension] || '#1a90ff'
-      const toneConflict = detectClusterToneDisagreement(cluster)
-      const points = cluster.events.map((e) => [e.lng, e.lat])
-      const hull = convexHull(points)
-      if (hull.length < 3) return null
-      const ring = hull.map(([lng, lat]) => ({ lat, lng, altitude: 0 }))
-      return {
-        key: `cl-${cluster.dimension}-${cluster.centroid.lat}-${cluster.centroid.lng}`,
-        ring,
-        fill: rgbaFromHex(dimensionColor, toneConflict ? 0.16 : 0.12),
-        stroke: rgbaFromHex(toneConflict ? '#ffaa00' : dimensionColor, toneConflict ? 0.85 : 0.55),
-        count: cluster.count,
-        centroid: cluster.centroid,
-        strokeColorHex: toneConflict ? '#ffaa00' : dimensionColor,
-        toneConflict,
-      }
-    }).filter(Boolean)
-  }, [globePlottedEvents])
+  /** Cluster hull VMs adapted to Map3D ring format (altitude required). */
+  const clusterLayers = useMemo(
+    () => clusters.map((cl) => ({
+      ...cl,
+      ring: cl.hullRing.map((p) => ({ lat: p.lat, lng: p.lng, altitude: 0 })),
+    })),
+    [clusters],
+  )
 
   const getSprite = useCallback((priority, dimension) => {
     const key = `${priority}_${dimension}`
@@ -527,51 +428,26 @@ function InnerMap({ onGlobeReady }) {
     (ev) => {
       const ll = literalLatLng(ev.detail?.position)
       if (!ll) return
-
-      const store = useAtlasStore.getState()
-      if (store.selectedMarker || store.selectedEvent) {
-        setSelectedMarker(null)
-        setSelectedEvent(null)
-        return
-      }
-
+      if (applyBackgroundClick()) return
       openStreetView({ lat: ll.lat, lng: ll.lng, source: 'globe' })
     },
-    [openStreetView, setSelectedEvent, setSelectedMarker],
+    [openStreetView],
   )
 
   const onEventClick = useCallback(
     (e, evt) => {
       e?.stopPropagation?.()
       e?.preventDefault?.()
-      const src = (evt.source || '').toLowerCase()
-      if (src.includes('gdelt')) {
-        setSelectedMarker(evt)
-        setSelectedEvent(null)
-      } else {
-        setSelectedEvent(evt)
-        setSelectedMarker(null)
-      }
+      applyMarkerClick(evt)
       flyToLngLat(evt.lat, evt.lng, 0.4)
     },
-    [flyToLngLat, setSelectedEvent, setSelectedMarker],
+    [flyToLngLat],
   )
 
-  const setPointerHover = useCallback(
-    (obj, isEvent) => {
-      const { x, y } = lastPointerRef.current
-      if (!obj) {
-        setHoveredMarker(null)
-        return
-      }
-      setHoveredMarker(
-        isEvent
-          ? { ...obj, _screenX: x, _screenY: y, _isEvent: true }
-          : { ...obj, _screenX: x, _screenY: y },
-      )
-    },
-    [setHoveredMarker],
-  )
+  const setPointerHover = useCallback((obj) => {
+    const { x, y } = lastPointerRef.current
+    applyMarkerHover(obj, x, y)
+  }, [])
 
   useEffect(() => {
     const ar = useAtlasStore.getState().getEffectiveSetting('autoRotate')
@@ -680,28 +556,15 @@ function InnerMap({ onGlobeReady }) {
   useEffect(() => {
     useAtlasStore.getState().setOnFlyToLocation((target) => {
       const map = map3dRef.current
-      if (!map?.flyCameraTo || !target) return
-      const { lat, lng, viewport, bbox } = target
-      const box = bbox || viewport
-      const centerLat = Number.isFinite(lat)
-        ? lat
-        : box
-          ? (box.south + box.north) / 2
-          : NaN
-      const centerLng = Number.isFinite(lng)
-        ? lng
-        : box
-          ? (box.west + box.east) / 2
-          : NaN
-      if (!Number.isFinite(centerLat) || !Number.isFinite(centerLng)) return
+      if (!map?.flyCameraTo) return
+      const t = resolveFlyToTarget(target)
+      if (!t) return
 
       let range
-      if (box && Number.isFinite(box.north) && Number.isFinite(box.south)) {
-        const latSpanDeg = Math.abs(box.north - box.south)
-        const lngSpanDeg = Math.abs(box.east - box.west)
-        const cosLat = Math.max(0.15, Math.abs(Math.cos((centerLat * Math.PI) / 180)))
-        const latSpanM = latSpanDeg * 111_000
-        const lngSpanM = lngSpanDeg * 111_000 * cosLat
+      if (t.latSpanDeg != null) {
+        const cosLat = Math.max(0.15, Math.abs(Math.cos((t.lat * Math.PI) / 180)))
+        const latSpanM = t.latSpanDeg * 111_000
+        const lngSpanM = t.lngSpanDeg * 111_000 * cosLat
         const maxSpanM = Math.max(latSpanM, lngSpanM)
         range = Math.max(800, Math.min(RANGE_MAX_M * 0.45, maxSpanM * 1.85))
       } else {
@@ -711,7 +574,7 @@ function InnerMap({ onGlobeReady }) {
       idleSpinGateRef.current = false
       map.flyCameraTo({
         endCamera: {
-          center: { lat: centerLat, lng: centerLng, altitude: 0 },
+          center: { lat: t.lat, lng: t.lng, altitude: 0 },
           range,
           heading: 0,
           tilt: FLY_TO_NADIR_TILT,
@@ -888,36 +751,22 @@ function InnerMap({ onGlobeReady }) {
     return rings.length > 0 ? { rings } : null
   }, [searchHighlight])
 
-  const heatOn = dataLayers?.gdeltHeatmap !== false
-  const choroOn = dataLayers?.gdeltChoropleth === true
-
-  const { heatmapPoints, choroplethRows, toneRange } = useGdeltGeoOverlay()
-
-  const heatBuckets = useMemo(() => {
-    if (!heatOn) return []
-    return bucketHeatPoints(heatmapPoints, 1.5)
-  }, [heatmapPoints, heatOn])
-
+  /** Choropleth VMs flattened to Map3D outer rings (capped for marker budget). */
   const choroPolygons = useMemo(() => {
-    if (!choroOn) return []
-    const min = toneRange?.min ?? -5
-    const max = toneRange?.max ?? 5
     const list = []
-    for (let i = 0; i < choroplethRows.length; i++) {
-      const r = choroplethRows[i]
-      const rings = geoJsonToOuterRings(r.geometry)
-      const fill = toneToChoroplethRgba(r.tone, min, max)
+    for (const c of choropleth) {
+      const rings = geoJsonToOuterRings(c.geometry)
       for (let j = 0; j < rings.length; j++) {
         list.push({
-          key: `gdelt-choro-${i}-${j}`,
+          key: `${c.key}-${j}`,
           ring: rings[j],
-          fill,
-          stroke: 'rgba(255,255,255,0.22)',
+          fill: c.fill,
+          stroke: c.stroke,
         })
       }
     }
     return list.slice(0, 220)
-  }, [choroplethRows, choroOn, toneRange])
+  }, [choropleth])
 
   return (
     <div
@@ -1119,35 +968,34 @@ function InnerMap({ onGlobeReady }) {
           </Marker3D>
         ))}
 
-        {globePlottedEvents.map((evt, idx) => {
-          const sprite = getSprite(evt.priority, evt.dimension)
-          const size = getSeveritySize(evt.severity)
-          const anim = getAnimationState(evt.timestamp)
+        {eventMarkers.map((vm, idx) => {
+          const evt = vm.raw
+          const sprite = getSprite(vm.priority, vm.dimension)
           const pulseClass =
-            anim !== 'static' && idx < 20 ? 'atlas-globe-event-pulse' : ''
+            vm.recency !== 'static' && idx < 20 ? 'atlas-globe-event-pulse' : ''
           const detLabel = showDetectionLabel(evt, idx)
           return (
             <Marker3D
-              key={evt.id}
-              position={{ lat: evt.lat, lng: evt.lng, altitude: 1400 }}
+              key={vm.id}
+              position={{ lat: vm.lat, lng: vm.lng, altitude: 1400 }}
               altitudeMode={AltitudeMode.RELATIVE_TO_GROUND}
               drawsWhenOccluded
               sizePreserved
               collisionBehavior={CollisionBehavior.REQUIRED_AND_HIDES_OPTIONAL}
-              title={evt.title}
+              title={vm.title}
               label={detLabel}
               zIndex={5}
               onClick={(e) => onEventClick(e, evt)}
             >
               <img
                 src={sprite}
-                width={size}
-                height={size}
+                width={vm.sizePx}
+                height={vm.sizePx}
                 alt=""
                 className={pulseClass}
-                style={{ opacity: evt.opacity ?? 1 }}
-                onMouseEnter={() => setPointerHover(evt, true)}
-                onMouseLeave={() => setHoveredMarker(null)}
+                style={{ opacity: vm.opacity ?? 1 }}
+                onMouseEnter={() => setPointerHover(evt)}
+                onMouseLeave={() => setPointerHover(null)}
               />
             </Marker3D>
           )
@@ -1175,21 +1023,22 @@ function InnerMap({ onGlobeReady }) {
           />
         ))}
 
-        {tacticalAircraft.map((ac, idx) => {
-          const size = ac.isMilitary ? 26 : 22
+        {aircraftMarkers.map((vm, idx) => {
+          const ac = vm.raw
+          const size = vm.sizePx
           const sprite = aircraftSpriteDataUrl(ac.trackDeg || 0, ac.isMilitary, size)
           const altM = ac.altitudeM != null ? Math.max(500, ac.altitudeM) : 8000
           const detLabel = showDetectionLabel(ac, idx)
           return (
             <Marker3D
-              key={ac.id}
-              position={{ lat: ac.lat, lng: ac.lng, altitude: altM }}
+              key={vm.id}
+              position={{ lat: vm.lat, lng: vm.lng, altitude: altM }}
               altitudeMode={AltitudeMode.RELATIVE_TO_GROUND}
               drawsWhenOccluded
               sizePreserved
               collisionBehavior={CollisionBehavior.REQUIRED}
               label={detLabel || (ac.isMilitary ? ac.callsign?.trim()?.slice(0, 8) : undefined)}
-              title={`${ac.title}${ac.altitudeM != null ? ` · ${Math.round(ac.altitudeM * 3.281)} ft` : ''}`}
+              title={`${vm.title}${ac.altitudeM != null ? ` · ${Math.round(ac.altitudeM * 3.281)} ft` : ''}`}
               zIndex={20}
               onClick={(e) => onEventClick(e, ac)}
             >
@@ -1199,27 +1048,28 @@ function InnerMap({ onGlobeReady }) {
                 height={size}
                 alt=""
                 draggable={false}
-                onMouseEnter={() => setPointerHover(ac, true)}
-                onMouseLeave={() => setHoveredMarker(null)}
+                onMouseEnter={() => setPointerHover(ac)}
+                onMouseLeave={() => setPointerHover(null)}
               />
             </Marker3D>
           )
         })}
 
-        {tacticalVessels.map((v, idx) => {
-          const size = 24
+        {vesselMarkers.map((vm, idx) => {
+          const v = vm.raw
+          const size = vm.sizePx
           const sprite = vesselSpriteDataUrl(v.cog || 0, size)
           const detLabel = showDetectionLabel(v, idx)
           return (
             <Marker3D
-              key={v.id}
-              position={{ lat: v.lat, lng: v.lng, altitude: 0 }}
+              key={vm.id}
+              position={{ lat: vm.lat, lng: vm.lng, altitude: 0 }}
               altitudeMode={AltitudeMode.CLAMP_TO_GROUND}
               drawsWhenOccluded
               sizePreserved
               collisionBehavior={CollisionBehavior.REQUIRED}
               label={detLabel || (v.shipName ? v.shipName.slice(0, 10) : undefined)}
-              title={`${v.title}${v.sog != null ? ` · ${v.sog.toFixed(1)} kn` : ''}`}
+              title={`${vm.title}${v.sog != null ? ` · ${v.sog.toFixed(1)} kn` : ''}`}
               zIndex={18}
               onClick={(e) => onEventClick(e, v)}
             >
@@ -1229,8 +1079,8 @@ function InnerMap({ onGlobeReady }) {
                 height={size}
                 alt=""
                 draggable={false}
-                onMouseEnter={() => setPointerHover(v, true)}
-                onMouseLeave={() => setHoveredMarker(null)}
+                onMouseEnter={() => setPointerHover(v)}
+                onMouseLeave={() => setPointerHover(null)}
               />
             </Marker3D>
           )
@@ -1276,21 +1126,22 @@ function InnerMap({ onGlobeReady }) {
           )
         })}
 
-        {(farGlobeView ? tacticalSatellites.slice(0, 120) : tacticalSatellites).map((sat, idx) => {
-          const size = 18
+        {(farGlobeView ? satelliteMarkers.slice(0, 120) : satelliteMarkers).map((vm, idx) => {
+          const sat = vm.raw
+          const size = vm.sizePx
           const sprite = satelliteSpriteDataUrl(sat.isMilitary, size)
           const altM = satelliteDisplayAltitudeM(sat.altitudeM, cameraRangeM)
           const detLabel = showDetectionLabel(sat, idx)
           return (
             <Marker3D
-              key={sat.id}
-              position={{ lat: sat.lat, lng: sat.lng, altitude: altM }}
+              key={vm.id}
+              position={{ lat: vm.lat, lng: vm.lng, altitude: altM }}
               altitudeMode={AltitudeMode.ABSOLUTE}
               drawsWhenOccluded
               sizePreserved
               collisionBehavior={farGlobeView ? CollisionBehavior.OPTIONAL_AND_HIDES_LOWER_PRIORITY : CollisionBehavior.REQUIRED}
               label={detLabel || (sat.satelliteGroup === 'stations' ? sat.title?.slice(0, 12) : undefined)}
-              title={`${sat.title}${sat.satellitePurposeLabel ? ` · ${sat.satellitePurposeLabel}` : ''}${sat.altitudeM != null ? ` · ${Math.round(sat.altitudeM / 1000)} km alt` : ''}`}
+              title={`${vm.title}${sat.satellitePurposeLabel ? ` · ${sat.satellitePurposeLabel}` : ''}${sat.altitudeM != null ? ` · ${Math.round(sat.altitudeM / 1000)} km alt` : ''}`}
               zIndex={farGlobeView ? 5 : 25}
               onClick={farGlobeView ? undefined : (e) => onEventClick(e, sat)}
             >
@@ -1300,8 +1151,8 @@ function InnerMap({ onGlobeReady }) {
                 height={size}
                 alt=""
                 draggable={false}
-                onMouseEnter={() => setPointerHover(sat, true)}
-                onMouseLeave={() => setHoveredMarker(null)}
+                onMouseEnter={() => setPointerHover(sat)}
+                onMouseLeave={() => setPointerHover(null)}
               />
             </Marker3D>
           )

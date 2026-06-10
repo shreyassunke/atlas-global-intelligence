@@ -46,16 +46,16 @@ export function sourceGroupStatus(statuses, sourceIds) {
   const totalEvents = rows.reduce((n, r) => n + (r.eventCount || 0), 0)
   if (totalEvents > 0) return 'ready'
 
-  if (rows.some((r) => r.status === 'connected' || r.status === 'partial')) return 'ready'
+  if (rows.some((r) => r.status === 'connected' || r.status === 'partial' || r.status === 'stale')) return 'ready'
 
   return 'loading'
 }
 
 /** Layer key → worker source id(s) for the splash checklist (informational). */
 export const LAYER_SOURCE_MAP = {
-  gdelt: { sources: ['gdelt', 'gdelt-cameo'], label: 'GDELT intelligence' },
-  gdeltHeatmap: { sources: ['gdelt', 'gdelt-cameo'], label: 'GDELT heatmap', geoOverlay: 'heatmap' },
-  gdeltChoropleth: { sources: ['gdelt', 'gdelt-cameo'], label: 'GDELT country tone', geoOverlay: 'choropleth' },
+  gdeltSignals: { sources: ['gdelt-cameo'], label: 'GDELT signals' },
+  gdeltHeatmap: { sources: ['gdelt'], label: 'GDELT heatmap', geoOverlay: 'heatmap' },
+  gdeltChoropleth: { sources: ['gdelt-cameo'], label: 'GDELT country tone', geoOverlay: 'choropleth' },
   firms: { sources: ['firms'], label: 'NASA FIRMS fires', optionalKeyed: true },
   usgs: { sources: ['usgs'], label: 'USGS earthquakes' },
   gdacs: { sources: ['gdacs'], label: 'GDACS disasters' },
@@ -64,8 +64,6 @@ export const LAYER_SOURCE_MAP = {
   satellites: { sources: ['celestrak-tle'], label: 'Satellite catalog' },
   ais: { sources: ['aisstream'], label: 'AIS vessel tracking', optionalKeyed: true },
   nhcStorms: { sources: ['noaa-nhc'], label: 'NOAA hurricane tracks' },
-  bluesky: { sources: ['bluesky'], label: 'Bluesky social signals' },
-  factCheck: { sources: ['fact-check'], label: 'Fact check claims', optionalKeyed: true },
 }
 
 /**
@@ -182,7 +180,7 @@ export function computeBootstrapSteps(ctx) {
       if (geoOverlay.loading) status = 'loading'
       else if (geoOverlay.heatmapReady) status = 'ready'
     }
-    if (cfg.geoOverlay === 'choropleth' && dataLayers?.gdeltChoropleth === true) {
+    if (cfg.geoOverlay === 'choropleth' && dataLayers?.gdeltChoropleth !== false) {
       if (geoOverlay.loading) status = 'loading'
       else if (geoOverlay.choroplethReady) status = 'ready'
     }

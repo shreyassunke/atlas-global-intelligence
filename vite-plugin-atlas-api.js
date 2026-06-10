@@ -44,12 +44,20 @@ async function toWebRequest(req, url) {
   return new Request(url, { method, headers, body })
 }
 
+// `style` selects how the handler is invoked:
+//   - 'web'  → Edge-style `handler(Request) => Response` (default)
+//   - 'node' → Node-style `handler(req, res)` (Vercel Node serverless functions)
 const DEV_API_ROUTES = [
   { method: 'GET', match: /^\/api\/opensky-states\/?$/, module: path.join(pluginRoot, 'api/opensky-states.js') },
   { method: 'GET', match: /^\/api\/celestrak-tle\/?$/, module: path.join(pluginRoot, 'api/celestrak-tle.js') },
   { method: 'GET', match: /^\/api\/aisstream-ships\/?$/, module: path.join(pluginRoot, 'api/aisstream-ships.js') },
   { method: 'GET', match: /^\/api\/nhc-storms\/?$/, module: path.join(pluginRoot, 'api/nhc-storms.js') },
+  { method: 'GET', match: /^\/api\/gdacs-rss\/?$/, module: path.join(pluginRoot, 'api/gdacs-rss.js') },
+  { methods: ['GET', 'POST', 'OPTIONS'], match: /^\/api\/feed-snapshots\/?$/, module: path.join(pluginRoot, 'api/feed-snapshots.js') },
   { method: 'POST', match: /^\/api\/overpass-landmarks\/?$/, module: path.join(pluginRoot, 'api/overpass-landmarks.js') },
+  // BigQuery proxy (Historical / Imagery / Network tabs). Served here so the
+  // main `npm run dev` server fully covers /api and `vercel dev` is optional.
+  { methods: ['GET', 'POST', 'OPTIONS'], match: /^\/api\/gdelt-query\/?$/, module: path.join(pluginRoot, 'api/gdelt-query.js'), style: 'node' },
 ]
 
 /** @type {Map<string, { default: Function }>} */
@@ -73,15 +81,24 @@ export default function atlasApiDevPlugin() {
 
       server.middlewares.use(async (req, res, next) => {
         const pathname = (req.url || '').split('?')[0]
-        const route = DEV_API_ROUTES.find(
-          (r) => r.method === req.method && r.match.test(pathname),
-        )
+        const route = DEV_API_ROUTES.find((r) => {
+          const methods = r.methods || [r.method]
+          return methods.includes(req.method) && r.match.test(pathname)
+        })
         if (!route) return next()
 
         try {
           const mod = await loadHandler(route.module)
           const handler = mod.default
           if (typeof handler !== 'function') return next()
+
+          if (route.style === 'node') {
+            // Vercel Node serverless functions accept the raw (req, res) and
+            // write the response themselves, so hand the dev server's objects
+            // straight through.
+            await handler(req, res)
+            return
+          }
 
           const host = req.headers.host || 'localhost:5173'
           const url = `http://${host}${req.url}`

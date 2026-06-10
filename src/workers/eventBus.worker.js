@@ -4,7 +4,9 @@ import {
   initializeCorroborationFields,
 } from '../core/crossSourceMerge.js'
 
-const RING_BUFFER_SIZE = 8000
+// Phase 1b: 8000 → 4000 — CAMEO pins are gated in the fetch worker now, so the
+// buffer no longer needs headroom for the raw 5k-row firehose per tick.
+const RING_BUFFER_SIZE = 4000
 const BATCH_INTERVAL = 200
 const SEV5_IMMUNITY_MS = 86400_000
 
@@ -128,7 +130,10 @@ function runAnomalyRules(newEvents) {
     const dailyAvg = baseline.total / Math.max(baselineAge, 1)
     const sixHourExpected = dailyAvg * 0.25
     if (recent.count > sixHourExpected * 2 && recent.count >= 5) {
-      const [cell, dimension] = key.split('_')
+      // Key shape is `${row}_${col}_${dimension}` — cell id keeps the first two parts.
+      const parts = key.split('_')
+      const cell = parts.slice(0, 2).join('_')
+      const dimension = parts.slice(2).join('_')
       anomalies.push({
         type: 'SPIKE',
         cell,

@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useAtlasStore } from '../store/atlasStore'
 import { deserializeAtlasUrlState, writeAtlasUrlState } from '../core/urlState'
 import { DIMENSION_KEYS } from '../core/eventSchema'
+import { loadCountryIndex, findCountry } from '../services/countryIndex'
 
 const SYNC_DEBOUNCE_MS = 450
 const CAMERA_DEBOUNCE_MS = 800
@@ -19,6 +20,9 @@ function pickUrlSyncState(state) {
     shareCamera: state.shareCamera,
     zoomLevel: state.zoomLevel,
     selectedEventId: state.selectedEvent?.id ?? null,
+    dossierCode: state.ui.workbench === 'dossier' && state.dossier
+      ? (state.dossier.iso || state.dossier.fips || state.dossier.name)
+      : null,
   }
 }
 
@@ -70,6 +74,16 @@ export function useAtlasUrlSync(enabled = true) {
     if (partial.shareCamera) store.setShareCamera(partial.shareCamera)
     if (typeof partial.zoomLevel === 'number') store.setZoomLevel(partial.zoomLevel)
     if (partial.selectedEventId) store.setPendingUrlEventId(partial.selectedEventId)
+
+    // ?dossier= — resolve ISO2/FIPS/name to a country once the index loads
+    if (partial.dossierCode) {
+      loadCountryIndex()
+        .then((index) => {
+          const hit = findCountry(index, { text: partial.dossierCode })
+          if (hit) useAtlasStore.getState().openDossier(hit)
+        })
+        .catch(() => { /* dossier deep link is best-effort */ })
+    }
 
     hydratedRef.current = true
     skipWriteRef.current = false

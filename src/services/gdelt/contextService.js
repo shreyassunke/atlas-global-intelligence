@@ -16,12 +16,13 @@ export const GDELT_CONTEXT_BASE = 'https://api.gdeltproject.org/api/v2/context/c
 export { timespanFromTimeFilter }
 
 /**
- * Context API `mode` values (see GDELT blog post):
- *   - SentenceList   — default, list of matching sentences
- *   - SentenceArtList — matching sentences grouped by article
- *   - ArtList        — article-level hits
+ * Context API `mode` values: the Context 2.0 API only supports `artlist`.
+ * Each result still carries the matching `sentence` (+ surrounding `context`),
+ * so this gives us sentence-level data. Any other value (e.g. `SentenceList`)
+ * makes GDELT return an HTML "Invalid mode." page with a 200 status, which our
+ * HTTP layer then surfaces as an error.
  */
-const DEFAULT_MODE = 'SentenceList'
+const DEFAULT_MODE = 'artlist'
 
 function buildContextUrl(query, { mode = DEFAULT_MODE, timespan = '1440min', maxrecords = 25 } = {}) {
   return buildGdeltUrl(GDELT_CONTEXT_BASE, {

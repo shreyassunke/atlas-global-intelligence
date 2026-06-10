@@ -31,7 +31,8 @@ export default function LiveTicker() {
   const feedRef = useRef(null)
 
   const tickerItems = useMemo(() => {
-    // Ticker shows P1 events by default for a quiet globe
+    // Phase 3 — ticker is the sole home of commercial news + GDELT DOC
+    // articles; P1 events keep priority slots at the top of the rotation.
     const eventItems = events
       .filter(e => e.priority === 'p1')
       .sort((a, b) => b.severity - a.severity || new Date(b.timestamp) - new Date(a.timestamp))
@@ -47,6 +48,25 @@ export default function LiveTicker() {
         priority: e.priority,
         time: e.timestamp,
         severity: e.severity,
+      }))
+
+    // GDELT DOC articles — country-centroid geocodes routed off the globe
+    // (Phase 1b); they surface here and in the expanded feed instead.
+    const docItems = events
+      .filter(e => e.priority !== 'p1' && e.tags?.includes('news') && e.tags?.includes('gdelt'))
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+      .slice(0, 20)
+      .map(e => ({
+        id: `evt_${e.id}`,
+        isEvent: true,
+        event: e,
+        title: e.title,
+        source: e.source,
+        color: DIMENSION_COLORS[e.dimension] || '#1a90ff',
+        dimension: e.dimension,
+        priority: e.priority,
+        time: e.timestamp,
+        severity: 0,
       }))
 
     const newsTickerItems = newsItems
@@ -70,7 +90,7 @@ export default function LiveTicker() {
         }
       })
 
-    return [...eventItems, ...newsTickerItems]
+    return [...eventItems, ...docItems, ...newsTickerItems]
       .sort((a, b) => b.severity - a.severity || new Date(b.time) - new Date(a.time))
       .slice(0, 40)
   }, [events, newsItems])

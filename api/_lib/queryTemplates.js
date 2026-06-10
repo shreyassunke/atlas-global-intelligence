@@ -60,7 +60,7 @@ export const TEMPLATES = {
         SUM(NumMentions)       AS mentions,
         COUNT(*)               AS events
       FROM \`gdelt-bq.gdeltv2.events_partitioned\`
-      WHERE _PARTITIONTIME >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @years YEAR)
+      WHERE _PARTITIONTIME >= TIMESTAMP(DATE_SUB(CURRENT_DATE(), INTERVAL @years YEAR))
         AND ActionGeo_CountryCode IS NOT NULL
         ${country ? 'AND ActionGeo_CountryCode = @country' : ''}
       GROUP BY country
@@ -88,7 +88,7 @@ export const TEMPLATES = {
         FORMAT_DATE('%Y%m', DATE(PARSE_TIMESTAMP('%Y%m%d', SUBSTR(CAST(DATE AS STRING), 1, 8)))) AS date,
         COUNT(*) AS value
       FROM \`gdelt-bq.gdeltv2.gkg_partitioned\`
-      WHERE _PARTITIONTIME >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @months MONTH)
+      WHERE _PARTITIONTIME >= TIMESTAMP(DATE_SUB(CURRENT_DATE(), INTERVAL @months MONTH))
         AND STRPOS(UPPER(V2Themes), @theme) > 0
       GROUP BY date
       ORDER BY date
@@ -118,7 +118,7 @@ export const TEMPLATES = {
         SUM(NumMentions) AS mentions,
         AVG(GoldsteinScale) AS avgGoldstein
       FROM \`gdelt-bq.gdeltv2.events_partitioned\`
-      WHERE _PARTITIONTIME >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @months MONTH)
+      WHERE _PARTITIONTIME >= TIMESTAMP(DATE_SUB(CURRENT_DATE(), INTERVAL @months MONTH))
         AND Actor1Name IS NOT NULL
         AND Actor2Name IS NOT NULL
         AND Actor1Name != Actor2Name
@@ -153,7 +153,7 @@ export const TEMPLATES = {
           CAST(SPLIT(V2Tone, ',')[SAFE_OFFSET(0)] AS FLOAT64) AS V2Tone_Polarity,
           V2Themes
         FROM \`gdelt-bq.gdeltv2.gkg_partitioned\`
-        WHERE _PARTITIONTIME >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @months MONTH)
+        WHERE _PARTITIONTIME >= TIMESTAMP(DATE_SUB(CURRENT_DATE(), INTERVAL @months MONTH))
           AND STRPOS(UPPER(V2Themes), @theme) > 0
       )
       WHERE V2Locations_CountryCode IS NOT NULL
@@ -219,7 +219,7 @@ export const TEMPLATES = {
         SELECT TRIM(SPLIT(entity_raw, ',')[SAFE_OFFSET(0)]) AS entity
         FROM \`gdelt-bq.gdeltv2.gkg_partitioned\`,
           UNNEST(SPLIT(${field}, ';')) AS entity_raw
-        WHERE _PARTITIONTIME >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @months MONTH)
+        WHERE _PARTITIONTIME >= TIMESTAMP(DATE_SUB(CURRENT_DATE(), INTERVAL @months MONTH))
           AND STRPOS(UPPER(V2Themes), @theme) > 0
           AND ${field} IS NOT NULL
       )
@@ -288,7 +288,7 @@ export const TEMPLATES = {
         SUM(NumMentions) AS mentions,
         AVG(GoldsteinScale) AS avgGoldstein
       FROM \`gdelt-bq.gdeltv2.events_partitioned\`
-      WHERE _PARTITIONTIME >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @months MONTH)
+      WHERE _PARTITIONTIME >= TIMESTAMP(DATE_SUB(CURRENT_DATE(), INTERVAL @months MONTH))
         AND ActionGeo_CountryCode IS NOT NULL
         AND QuadClass BETWEEN 1 AND 4
         ${country ? 'AND ActionGeo_CountryCode = @country' : ''}
@@ -331,7 +331,7 @@ export const TEMPLATES = {
           V2LocationsCountryCode
         FROM \`gdelt-bq.gdeltv2.vgkg_partitioned\`,
           UNNEST(SPLIT(COALESCE(ImgLabels, ''), ';')) AS entry
-        WHERE _PARTITIONTIME >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @months MONTH)
+        WHERE _PARTITIONTIME >= TIMESTAMP(DATE_SUB(CURRENT_DATE(), INTERVAL @months MONTH))
           AND STRPOS(UPPER(COALESCE(V2Themes, '')), @theme) > 0
       )
       WHERE label IS NOT NULL AND label != ''
@@ -368,7 +368,7 @@ export const TEMPLATES = {
           SAFE_CAST(SPLIT(token, ':')[SAFE_OFFSET(1)] AS FLOAT64) AS value
         FROM \`gdelt-bq.gdeltv2.gkg_partitioned\`,
           UNNEST(SPLIT(COALESCE(V2GCAM, ''), ',')) AS token
-        WHERE _PARTITIONTIME >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @months MONTH)
+        WHERE _PARTITIONTIME >= TIMESTAMP(DATE_SUB(CURRENT_DATE(), INTERVAL @months MONTH))
           AND STRPOS(UPPER(COALESCE(V2Themes, '')), @theme) > 0
       )
       WHERE code IS NOT NULL
@@ -402,7 +402,7 @@ export const TEMPLATES = {
         AVG(SAFE_CAST(SPLIT(V2Tone, ',')[SAFE_OFFSET(0)] AS FLOAT64)) AS avgTone,
         COUNT(DISTINCT DATE(_PARTITIONTIME)) AS activeDays
       FROM \`gdelt-bq.gdeltv2.gkg_partitioned\`
-      WHERE _PARTITIONTIME >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @months MONTH)
+      WHERE _PARTITIONTIME >= TIMESTAMP(DATE_SUB(CURRENT_DATE(), INTERVAL @months MONTH))
         AND STRPOS(UPPER(COALESCE(V2Themes, '')), @theme) > 0
         AND SourceCommonName IS NOT NULL
       GROUP BY source
@@ -432,7 +432,7 @@ export const TEMPLATES = {
         COUNT(*) AS mentions,
         COUNT(DISTINCT station) AS distinctStations
       FROM \`gdelt-bq.gdeltv2.iatv\`
-      WHERE _PARTITIONTIME >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @months MONTH)
+      WHERE _PARTITIONTIME >= TIMESTAMP(DATE_SUB(CURRENT_DATE(), INTERVAL @months MONTH))
         AND REGEXP_CONTAINS(LOWER(snippet), LOWER(@keyword))
       GROUP BY month
       ORDER BY month

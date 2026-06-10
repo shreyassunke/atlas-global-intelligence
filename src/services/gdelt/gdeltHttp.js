@@ -15,11 +15,15 @@
  * overlay hook, summary/context/TV services — all call GDELT concurrently,
  * so relying on per-call sleeps is not enough: a shared gate is required.
  *
- * `withGdeltGate` runs `fn` on a per-module queue that guarantees a minimum
- * spacing of `GDELT_REQUEST_GAP_MS` between *any* two GDELT REST calls made
- * in the current JS context (main thread or a worker). It also backs off
- * when GDELT reports a 429 so the next caller waits long enough for the
- * rate-limit window to clear instead of immediately retriggering it.
+ * `withGdeltGate` serializes `fn` and guarantees a minimum spacing of
+ * `GDELT_REQUEST_GAP_MS` between the *start* of any two GDELT REST calls. When
+ * the Web Locks API is available (all modern browsers + Web Workers) the gate
+ * is held on a single named lock that is shared across the page and every
+ * worker on the same origin, so the fetch-manager worker's DOC chain, the
+ * analytics panel, the geo overlay and summary/context/TV calls can no longer
+ * fire concurrently and trip GDELT's "1 request / 5s" limiter. Older runtimes
+ * fall back to a per-context promise queue. The gate also backs off after a
+ * 429 so the rate-limit window clears before the next caller runs.
  */
 
 /** Per their docs, GDELT asks for ≥5s between requests from the same origin. */
@@ -28,15 +32,59 @@ export const GDELT_REQUEST_GAP_MS = 5500
 /** Extra wait after a 429 so the shared window is definitely clear. */
 const GDELT_BACKOFF_AFTER_429_MS = 9000
 
+/** Default per-request timeout so no single hung fetch holds the shared lock. */
+export const GDELT_DEFAULT_TIMEOUT_MS = 20_000
+
+/** Origin-wide lock name; shared between the main thread and all workers. */
+const GDELT_LOCK_NAME = 'atlas-gdelt-gate'
+
+const hasWebLocks =
+  typeof navigator !== 'undefined' &&
+  navigator.locks &&
+  typeof navigator.locks.request === 'function'
+
 let gdeltQueueTail = Promise.resolve()
-let gdeltLastRequestAt = 0
+let pendingBackoffMs = 0
 
 /**
- * Serialize `fn` on the shared GDELT request queue, enforcing the minimum
- * inter-request gap. Errors from `fn` propagate; the gate timing is updated
- * regardless so a failed request still counts against the rate-limit window.
+ * After the server tells us we've hit the limit, hold the gate open long enough
+ * for GDELT's counter to fully reset before the next request runs. Read (and
+ * cleared) by `spacedRun` inside the lock so the backoff applies origin-wide.
+ */
+function markGdeltRateLimited() {
+  pendingBackoffMs = Math.max(pendingBackoffMs, GDELT_BACKOFF_AFTER_429_MS)
+}
+
+/**
+ * Run `fn`, then keep the gate held until at least `GDELT_REQUEST_GAP_MS` has
+ * elapsed since the request started (or longer after a 429). Spacing the
+ * *starts* of requests — rather than waiting a full gap after each completes —
+ * keeps throughput at GDELT's documented ceiling instead of well under it.
+ */
+async function spacedRun(fn) {
+  const start = Date.now()
+  try {
+    return await fn()
+  } finally {
+    let hold = Math.max(0, GDELT_REQUEST_GAP_MS - (Date.now() - start))
+    if (pendingBackoffMs > 0) {
+      hold = Math.max(hold, pendingBackoffMs)
+      pendingBackoffMs = 0
+    }
+    if (hold > 0) await new Promise((r) => setTimeout(r, hold))
+  }
+}
+
+/**
+ * Serialize `fn` on the shared GDELT gate, enforcing the minimum inter-request
+ * spacing. Errors from `fn` propagate; the spacing still applies so a failed
+ * request counts against the rate-limit window.
  */
 async function withGdeltGate(fn) {
+  if (hasWebLocks) {
+    return navigator.locks.request(GDELT_LOCK_NAME, () => spacedRun(fn))
+  }
+  // Fallback (older runtimes): serialize within this JS context only.
   const prev = gdeltQueueTail
   let release
   gdeltQueueTail = new Promise((r) => {
@@ -44,26 +92,32 @@ async function withGdeltGate(fn) {
   })
   try {
     await prev
-    const now = Date.now()
-    const wait = Math.max(0, gdeltLastRequestAt + GDELT_REQUEST_GAP_MS - now)
-    if (wait > 0) await new Promise((r) => setTimeout(r, wait))
-    try {
-      return await fn()
-    } finally {
-      gdeltLastRequestAt = Date.now()
-    }
+    return await spacedRun(fn)
   } finally {
     release()
   }
 }
 
 /**
- * After the server tells us we've hit the limit, push the next allowed request
- * out far enough that the GDELT server's counter fully resets before we try
- * again. Called from the error paths in `fetchGdeltJson` / `fetchGdeltText`.
+ * Combine an optional caller `AbortSignal` with a timeout so every gated fetch
+ * is bounded. Returns the signal to pass to `fetch` plus a `cleanup` to clear
+ * the timer / listener once the request settles.
  */
-function markGdeltRateLimited() {
-  gdeltLastRequestAt = Date.now() + GDELT_BACKOFF_AFTER_429_MS - GDELT_REQUEST_GAP_MS
+function withTimeout(signal, timeoutMs) {
+  const ctrl = new AbortController()
+  const onAbort = () => ctrl.abort(signal?.reason)
+  if (signal) {
+    if (signal.aborted) ctrl.abort(signal.reason)
+    else signal.addEventListener('abort', onAbort, { once: true })
+  }
+  const timer = setTimeout(() => {
+    ctrl.abort(new DOMException(`GDELT request timed out after ${timeoutMs}ms`, 'TimeoutError'))
+  }, timeoutMs)
+  const cleanup = () => {
+    clearTimeout(timer)
+    if (signal) signal.removeEventListener('abort', onAbort)
+  }
+  return { signal: ctrl.signal, cleanup }
 }
 
 /**
@@ -95,49 +149,59 @@ function isGdeltRateLimitBody(text) {
 }
 
 /** Fetch JSON from GDELT; throws Error with a human message when the API returns HTML. */
-export async function fetchGdeltJson(url, { signal } = {}) {
+export async function fetchGdeltJson(url, { signal, timeoutMs = GDELT_DEFAULT_TIMEOUT_MS } = {}) {
   return withGdeltGate(async () => {
-    const res = await fetch(url, { signal })
-    if (res.status === 429) {
-      markGdeltRateLimited()
-      throw new Error('GDELT HTTP 429 (rate-limited)')
-    }
-    if (!res.ok) throw new Error(`GDELT HTTP ${res.status}`)
-    const ct = res.headers.get('content-type') || ''
-    const text = await res.text()
-    if (!text) return null
-    if (isGdeltRateLimitBody(text)) {
-      markGdeltRateLimited()
-      throw new Error('GDELT rate-limited (please limit requests)')
-    }
-    if (ct.includes('text/html') || isHtmlLike(text)) {
-      const snippet = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160)
-      throw new Error(snippet || 'GDELT returned HTML (invalid query?)')
-    }
+    const { signal: gated, cleanup } = withTimeout(signal, timeoutMs)
     try {
-      return JSON.parse(text)
-    } catch (e) {
-      throw new Error(`GDELT JSON parse failed: ${e.message}`)
+      const res = await fetch(url, { signal: gated })
+      if (res.status === 429) {
+        markGdeltRateLimited()
+        throw new Error('GDELT HTTP 429 (rate-limited)')
+      }
+      if (!res.ok) throw new Error(`GDELT HTTP ${res.status}`)
+      const ct = res.headers.get('content-type') || ''
+      const text = await res.text()
+      if (!text) return null
+      if (isGdeltRateLimitBody(text)) {
+        markGdeltRateLimited()
+        throw new Error('GDELT rate-limited (please limit requests)')
+      }
+      if (ct.includes('text/html') || isHtmlLike(text)) {
+        const snippet = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160)
+        throw new Error(snippet || 'GDELT returned HTML (invalid query?)')
+      }
+      try {
+        return JSON.parse(text)
+      } catch (e) {
+        throw new Error(`GDELT JSON parse failed: ${e.message}`)
+      }
+    } finally {
+      cleanup()
     }
   })
 }
 
 /** Fetch GeoJSON/CSV/text body; throws when the response appears to be HTML. */
-export async function fetchGdeltText(url, { signal } = {}) {
+export async function fetchGdeltText(url, { signal, timeoutMs = GDELT_DEFAULT_TIMEOUT_MS } = {}) {
   return withGdeltGate(async () => {
-    const res = await fetch(url, { signal })
-    if (res.status === 429) {
-      markGdeltRateLimited()
-      throw new Error('GDELT HTTP 429 (rate-limited)')
+    const { signal: gated, cleanup } = withTimeout(signal, timeoutMs)
+    try {
+      const res = await fetch(url, { signal: gated })
+      if (res.status === 429) {
+        markGdeltRateLimited()
+        throw new Error('GDELT HTTP 429 (rate-limited)')
+      }
+      if (!res.ok) throw new Error(`GDELT HTTP ${res.status}`)
+      const text = await res.text()
+      if (isGdeltRateLimitBody(text)) {
+        markGdeltRateLimited()
+        throw new Error('GDELT rate-limited (please limit requests)')
+      }
+      if (isHtmlLike(text)) throw new Error('GDELT returned HTML (invalid query?)')
+      return text
+    } finally {
+      cleanup()
     }
-    if (!res.ok) throw new Error(`GDELT HTTP ${res.status}`)
-    const text = await res.text()
-    if (isGdeltRateLimitBody(text)) {
-      markGdeltRateLimited()
-      throw new Error('GDELT rate-limited (please limit requests)')
-    }
-    if (isHtmlLike(text)) throw new Error('GDELT returned HTML (invalid query?)')
-    return text
   })
 }
 

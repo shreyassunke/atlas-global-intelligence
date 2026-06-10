@@ -5,24 +5,20 @@ import { useNewsData } from './hooks/useNewsData'
 import Onboarding from './components/Onboarding/Onboarding'
 import CesiumStarfieldBackground from './components/Onboarding/CesiumStarfieldBackground'
 import Header from './components/UI/Header'
-import FilterPanel from './components/UI/FilterPanel'
-import NewsCard from './components/UI/NewsCard'
-import EventPanel from './components/UI/EventPanel'
-import GDELTAnalyticsPanel from './components/UI/GDELTAnalyticsPanel'
+import Inspector from './components/Inspector/Inspector'
+import Workbench from './components/Workbench/Workbench'
 import LiveTicker from './components/Feed/LiveTicker'
-import HoverLabel from './components/UI/RegionRing'
+import HoverLabel from './components/UI/HoverLabel'
 import StreetViewOverlay from './components/UI/StreetViewOverlay'
 import YouTubeEmbedOverlay from './components/UI/YouTubeEmbedOverlay'
-import SettingsPanel from './components/UI/SettingsPanel'
-import DimensionFilters from './components/UI/DimensionFilters'
 import FetchStatusOverlay from './components/UI/FetchStatusOverlay'
 import AtlasBootstrapOverlay from './components/UI/AtlasBootstrapOverlay'
-import SearchResultCard from './components/UI/SearchResultCard'
 import { usePreferencesSync } from './hooks/usePreferencesSync'
 import useAtlasBootstrap from './hooks/useAtlasBootstrap'
 import useLandmarkPresets from './hooks/useLandmarkPresets'
 import useAtlasUrlSync from './hooks/useAtlasUrlSync'
 import useWatchlistAlerts from './hooks/useWatchlistAlerts'
+import useSurgeAlerts from './hooks/useSurgeAlerts'
 import useAlertDispatch from './hooks/useAlertDispatch'
 import ToastHost from './components/UI/ToastHost'
 import { supabase } from './services/supabase'
@@ -75,12 +71,12 @@ export default function App() {
   const tacticalMode = useAtlasStore((s) => s.tacticalMode)
   const initEventBusSystem = useAtlasStore((s) => s.initEventBusSystem)
   const colorblindMode = useAtlasStore((s) => s.colorblindMode)
-  const [filtersOpen, setFiltersOpen] = useState(false)
   useNewsData()
   usePreferencesSync()
   const onGlobeView = hasCompletedOnboarding && !launchTransitionActive
   useAtlasUrlSync(onGlobeView)
   useWatchlistAlerts(onGlobeView)
+  useSurgeAlerts(onGlobeView)
   useAlertDispatch(onGlobeView)
 
   useEffect(() => {
@@ -171,10 +167,10 @@ export default function App() {
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
 
       if (e.key === 'Escape') {
-        setHudHidden(false)
-        useAtlasStore.getState().closeGdeltAnalytics()
-        useAtlasStore.getState().setSelectedEvent(null)
-        useAtlasStore.getState().setSelectedMarker(null)
+        // Close the top-most open layer only: modal → workbench → inspector.
+        // When everything is already closed, restore a hidden HUD.
+        const closed = useAtlasStore.getState().closeTopPanel()
+        if (!closed) setHudHidden(false)
         return
       }
 
@@ -291,34 +287,15 @@ export default function App() {
                   <Header
                     hudHidden={hudHidden}
                     onToggleHud={() => setHudHidden((v) => !v)}
-                    onToggleFilters={() => setFiltersOpen((v) => !v)}
-                    filtersOpen={filtersOpen}
                   />
 
-                  <AnimatePresence>
-                    {filtersOpen && (
-                      <motion.div
-                        className="hud-filters-sidebar"
-                        initial={{ opacity: 0, x: -12 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, x: -12 }}
-                        transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-                      >
-                        <DimensionFilters />
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-
-                  <EventPanel />
-                  <GDELTAnalyticsPanel />
-                  <NewsCard />
+                  <Inspector />
+                  <Workbench />
                   <StreetViewOverlay />
                   <YouTubeEmbedOverlay />
                   <HoverLabel />
                   <LiveTicker />
-                  <SettingsPanel />
                   <FetchStatusOverlay />
-                  <SearchResultCard />
                   <ToastHost />
                 </motion.div>
               )}

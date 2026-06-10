@@ -108,10 +108,22 @@ export default async function handler(req) {
       headers: {
         'Content-Type': 'text/plain; charset=utf-8',
         'Access-Control-Allow-Origin': '*',
-        'Cache-Control': 'public, max-age=3600',
+        'Cache-Control': 'public, max-age=3600, stale-while-revalidate=21600',
       },
     })
   } catch (err) {
+    const cached = cache.get(group)
+    if (cached) {
+      return new Response(cached.body, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control': 'public, max-age=1800, stale-while-revalidate=21600',
+          'X-Atlas-Stale': 'celestrak-cache',
+        },
+      })
+    }
     return new Response(err.message || 'CelesTrak proxy failed', {
       status: 502,
       headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'text/plain' },

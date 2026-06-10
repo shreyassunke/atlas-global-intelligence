@@ -16,7 +16,7 @@
  */
 
 import { unzipSync, strFromU8 } from 'fflate'
-import { DIMENSIONS, cameoToDimension } from '../../core/eventSchema.js'
+import { cameoToDimension } from '../../core/eventSchema.js'
 
 // ── CAMEO root codes we care about ──
 // 14 = Protest, 17 = Coerce, 18 = Assault, 19 = Fight, 20 = Use Unconventional Mass Violence
@@ -75,13 +75,10 @@ const CAMEO_ROOT_RE = /^(0[1-9]|1[0-9]|20)$/
  *
  * Throttle notes
  * --------------
- * Earlier revisions restricted CAMEO to ~11 of the 20 root families and
- * required `numMentions >= 3`, which silently dropped 60-80% of rows per
- * 15-minute export and left the globe with only a handful of pins. We now
- * accept every valid CAMEO root so the globe reflects the full GDELT
- * firehose; `cameoToDimension` already maps all 20 root families to an
- * ATLAS dimension (with a NARRATIVE fallback for categories we don't
- * explicitly classify).
+ * Every valid CAMEO root is parsed — the full row set feeds the in-worker
+ * per-country aggregates (choropleth + surge baselines). Pin-worthiness
+ * (`numSources` / `severity` gating) is decided downstream in
+ * `fetchManager.worker.js`, not here.
  */
 function parseGdeltRow(columns) {
   const lat = parseFloat(columns[COL.ActionGeo_Lat])
@@ -110,6 +107,9 @@ function parseGdeltRow(columns) {
   const actor1 = columns[COL.Actor1Name] || ''
   const actor2 = columns[COL.Actor2Name] || ''
   const location = columns[COL.ActionGeo_FullName] || ''
+  // FIPS 10-4 code (GDELT's ActionGeo country standard) — joins directly to
+  // Natural Earth `FIPS_10` for the in-worker country aggregates.
+  const countryCode = (columns[COL.ActionGeo_CountryCode] || '').trim().toUpperCase()
   const cameoCode = columns[COL.EventCode] || ''
   const sqlDate = columns[COL.SQLDATE] || ''
   const sourceUrl = columns[COL.SOURCEURL] || ''
@@ -143,6 +143,7 @@ function parseGdeltRow(columns) {
     actor2,
     sqlDate,
     locationName: location,
+    countryCode,
     layer: 'gdelt',
   }
 }
@@ -171,70 +172,6 @@ const CAMEO_LABELS = {
   '18': 'Assault',
   '19': 'Fight',
   '20': 'Mass Violence',
-}
-
-/**
- * Fetch and parse the latest GDELT 2.0 15-minute Event CSV.
- * Returns an array of parsed event objects.
- */
-export async function fetchGdeltEvents() {
-  try {
-    // Step 1: Get the latest CSV URL from GDELT's lastupdate file
-    const updateRes = await fetch(
-      'https://data.gdeltproject.org/gdeltv2/lastupdate.txt'
-    )
-    if (!updateRes.ok) throw new Error(`GDELT lastupdate HTTP ${updateRes.status}`)
-    const updateText = await updateRes.text()
-
-    // Parse the lastupdate.txt — each line has: size hash url
-    // We want the .export.CSV.zip line
-    const lines = updateText.trim().split('\n')
-    const exportLine = lines.find((l) => l.includes('.export.CSV'))
-    if (!exportLine) throw new Error('No export CSV found in lastupdate.txt')
-
-    const csvUrl = exportLine.split(' ').pop()
-    if (!csvUrl) throw new Error('Could not parse CSV URL')
-
-    // Step 2: Fetch the CSV (it's actually a zip, but GDELT also provides
-    // an unzipped API endpoint via the doc API for recent events)
-    // Fallback: use GDELT's GKG/Event API for recent 15-min events
-    const apiUrl = 'https://api.gdeltproject.org/api/v2/doc/doc?' +
-      'query=conflict OR war OR protest OR military OR terror OR earthquake OR crisis&' +
-      'mode=ArtList&maxrecords=50&format=json&' +
-      'sort=DateDesc&timespan=15min'
-
-    const apiRes = await fetch(apiUrl)
-    if (!apiRes.ok) throw new Error(`GDELT API HTTP ${apiRes.status}`)
-    const apiData = await apiRes.json()
-
-    if (!apiData?.articles) return []
-
-    // Map articles through our enrichment pipeline
-    return apiData.articles.map((article) => ({
-      lat: 0,
-      lng: 0,
-      title: article.title || 'GDELT Event',
-      detail: `Source: ${article.dimension || 'unknown'}`,
-      sourceUrl: article.url || '',
-      dimension: DIMENSIONS.NARRATIVE,
-      severity: 1,
-      corroborationCount: 1,
-      numMentions: 1,
-      numSources: 1,
-      toneScore: parseFloat(article.tone) || 0,
-      actor1: '',
-      actor2: '',
-      cameoRoot: '',
-      quadClass: 0,
-      goldstein: 0,
-      sqlDate: article.seendate || '',
-      locationName: '',
-      layer: 'gdelt',
-    })).filter(Boolean)
-  } catch (err) {
-    console.warn('[GDELT EventService] Fetch failed:', err.message)
-    return []
-  }
 }
 
 /**
@@ -274,11 +211,10 @@ const MAX_ZIP_BYTES = 128 * 1024 * 1024
  * Maximum CAMEO rows we parse per invocation.
  *
  * The raw 15-minute export typically holds 5k-30k rows globally. We parse
- * a large slice so the globe can show the full firehose of geocoded events
- * while leaving the row-level filter (valid CAMEO root + valid lat/lng) to
- * cull obviously noisy rows. The globe rendering layer caps visible markers
- * further, so raising this doesn't risk GPU overload — it just ensures the
- * worker has a rich enough pool to dedup, cluster, and render from.
+ * a large slice because ALL rows feed the in-worker per-country aggregates
+ * (choropleth tone + Triage surge baselines); only the high-confidence
+ * subset (`numSources >= 3` OR `severity >= 4`, gated in
+ * `fetchManager.worker.js`) becomes globe pins.
  */
 const MAX_CAMEO_ROWS = 5000
 

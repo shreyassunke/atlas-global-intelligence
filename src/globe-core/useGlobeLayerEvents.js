@@ -1,7 +1,20 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+/**
+ * globe-core/useGlobeLayerEvents — shared globe event filtering for all
+ * renderers. Respects Settings → Data Layers, dimension filters, time and
+ * priority HUD tiers, and the world-zoom LOD gate.
+ */
+import { useEffect, useMemo, useState } from 'react'
 import { useAtlasStore } from '../store/atlasStore'
+import { isLayerToggleOn } from '../core/layerCatalog'
 import { eventSourceToGlobeDataLayerKey } from '../core/globeLayers'
 import { propagateTle } from '../core/satellitePropagation'
+import {
+  isWorldZoom,
+  MAX_GLOBE_MARKERS,
+  MAX_TACTICAL_AIRCRAFT,
+  MAX_TACTICAL_SATELLITES,
+  MAX_TACTICAL_VESSELS,
+} from './lod'
 
 const TIME_FILTER_MAX_AGE_MS = {
   live: 2 * 3600_000,
@@ -11,10 +24,6 @@ const TIME_FILTER_MAX_AGE_MS = {
 }
 
 const DEFAULT_DIMENSIONS = ['safety', 'governance', 'economy', 'people', 'environment', 'narrative']
-const MAX_GLOBE_MARKERS = 2500
-const MAX_TACTICAL_AIRCRAFT = 500
-const MAX_TACTICAL_VESSELS = 400
-const MAX_TACTICAL_SATELLITES = 400
 export const SAT_PROPAGATION_INTERVAL_MS = 2000
 
 function effectiveDimensions(activeDimensions) {
@@ -26,7 +35,7 @@ function effectiveDimensions(activeDimensions) {
 
 function isLayerEnabled(dataLayers, layerKey) {
   if (!layerKey) return false
-  return dataLayers?.[layerKey] !== false
+  return isLayerToggleOn(layerKey, dataLayers || {})
 }
 
 function passesTimeFilter(evt, timeFilter) {
@@ -48,20 +57,18 @@ function passesPriorityFilter(evt, priorityFilter) {
   return true
 }
 
-/**
- * Shared globe event filtering for Google Map3D and Globe.GL.
- * Respects Settings → Data Layers, dimension filters, time/priority HUD tiers.
- */
 export function useGlobeLayerEvents() {
   const events = useAtlasStore((s) => s.events)
   const dataLayers = useAtlasStore((s) => s.dataLayers)
   const activeDimensions = useAtlasStore((s) => s.activeDimensions)
   const priorityFilter = useAtlasStore((s) => s.priorityFilter)
   const timeFilter = useAtlasStore((s) => s.timeFilter)
+  // Boolean selector — re-renders only when the LOD tier flips, not on every zoom tick.
+  const worldZoom = useAtlasStore((s) => isWorldZoom(s.globeMode, s.zoomLevel))
 
   const [propagationTick, setPropagationTick] = useState(0)
   useEffect(() => {
-    if (dataLayers?.satellites === false) return undefined
+    if (!isLayerToggleOn('satellites', dataLayers || {})) return undefined
     const id = setInterval(() => setPropagationTick((t) => t + 1), SAT_PROPAGATION_INTERVAL_MS)
     return () => clearInterval(id)
   }, [dataLayers?.satellites])
@@ -79,6 +86,7 @@ export function useGlobeLayerEvents() {
       const layerKey = eventSourceToGlobeDataLayerKey(evt.source)
       if (!layerKey || !isLayerEnabled(dataLayers, layerKey)) continue
       if (!dims.has(evt.dimension)) continue
+      if (worldZoom && evt.priority === 'p3') continue // LOD: P1/P2 only at world zoom
       if (!passesPriorityFilter(evt, priorityFilter)) continue
       if (!passesTimeFilter(evt, timeFilter)) continue
       list.push(evt)
@@ -103,7 +111,7 @@ export function useGlobeLayerEvents() {
     })
     scored.sort((a, b) => b.score - a.score)
     return scored.slice(0, MAX_GLOBE_MARKERS).map((s) => s.evt)
-  }, [events, dataLayers, dims, priorityFilter, timeFilter])
+  }, [events, dataLayers, dims, priorityFilter, timeFilter, worldZoom])
 
   const tacticalAircraft = useMemo(() => {
     if (!isLayerEnabled(dataLayers, 'adsb')) return []
@@ -154,47 +162,6 @@ export function useGlobeLayerEvents() {
     return list.slice(0, MAX_TACTICAL_SATELLITES)
   }, [events, dataLayers?.satellites, propagationTick])
 
-  const filterFlatMapEvents = useCallback(() => {
-    const out = []
-    for (const evt of events) {
-      if (evt.lat == null || evt.lng == null) continue
-      if (evt.lat === 0 && evt.lng === 0 && evt.latApproximate) continue
-
-      if (evt.trackKind === 'aircraft') {
-        if (!isLayerEnabled(dataLayers, 'adsb')) continue
-        if (evt.isMilitary && !isLayerEnabled(dataLayers, 'adsbMilitary')) continue
-        out.push(evt)
-        continue
-      }
-      if (evt.trackKind === 'satellite') {
-        if (!isLayerEnabled(dataLayers, 'satellites')) continue
-        if (!evt.tleLine1 || !evt.tleLine2) continue
-        const pos = propagateTle(evt.tleLine1, evt.tleLine2, new Date())
-        if (!pos) continue
-        out.push({ ...evt, lat: pos.lat, lng: pos.lng })
-        continue
-      }
-      if (evt.trackKind === 'vessel') {
-        if (!isLayerEnabled(dataLayers, 'ais')) continue
-        out.push(evt)
-        continue
-      }
-      if (evt.trackKind === 'storm') {
-        if (!isLayerEnabled(dataLayers, 'nhcStorms')) continue
-        if (evt.lat != null && evt.lng != null) out.push(evt)
-        continue
-      }
-
-      const layerKey = eventSourceToGlobeDataLayerKey(evt.source)
-      if (!layerKey || !isLayerEnabled(dataLayers, layerKey)) continue
-      if (!dims.has(evt.dimension)) continue
-      if (!passesPriorityFilter(evt, priorityFilter)) continue
-      if (!passesTimeFilter(evt, timeFilter)) continue
-      out.push(evt)
-    }
-    return out
-  }, [events, dataLayers, dims, priorityFilter, timeFilter])
-
   return {
     globePlottedEvents,
     tacticalAircraft,
@@ -202,7 +169,6 @@ export function useGlobeLayerEvents() {
     tacticalSatellites,
     stormOverlays,
     propagationTick,
-    filterFlatMapEvents,
   }
 }
 

@@ -8,10 +8,13 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 import { useAtlasStore } from '../../store/atlasStore'
 import { getTimezoneViewCenter } from '../../utils/geo'
 import { isMobileDevice } from '../../config/qualityTiers'
-import { DIMENSION_COLORS } from '../../core/eventSchema'
 import { GIBS_IMAGERY_LAYERS, GIBS_IMAGERY_LAYER_KEYS, gibsMaplibreTiles } from '../../config/gibsBasemap'
 import { terminatorGeoJsonLine } from '../../core/solarTerminator'
-import useGlobeLayerEvents from '../../hooks/useGlobeLayerEvents'
+import {
+  useGlobeViewModels,
+  applyMarkerClick,
+  resolveFlyToTarget,
+} from '../../globe-core'
 import { showDetectionLabel as getDetectionLabel } from '../../core/detectionLabels'
 
 function buildDetectionLabelFeatures(events, opts) {
@@ -70,19 +73,20 @@ function regionKeyForState(feat) {
   return null
 }
 
-function buildEventFeatures(events) {
-  return events
-    .filter((e) => e.lat != null && e.lng != null)
-    .map((e) => ({
+/** Marker view-models (globe-core) → MapLibre circle features. */
+function buildEventFeatures(markers) {
+  return markers
+    .filter((vm) => vm.lat != null && vm.lng != null)
+    .map((vm) => ({
       type: 'Feature',
-      geometry: { type: 'Point', coordinates: [e.lng, e.lat] },
+      geometry: { type: 'Point', coordinates: [vm.lng, vm.lat] },
       properties: {
-        color: DIMENSION_COLORS[e.dimension] || '#1a90ff',
-        radius_min: Math.max(3, (e.severity || 1) * 1.5),
-        radius_max: Math.max(6, (e.severity || 1) * 4),
-        opacity: e.opacity ?? 0.8,
+        color: vm.color,
+        radius_min: Math.max(3, (vm.severity || 1) * 1.5),
+        radius_max: Math.max(6, (vm.severity || 1) * 4),
+        opacity: vm.raw?.opacity ?? 0.8,
         _isEvent: true,
-        _eventData: JSON.stringify(e),
+        _eventData: JSON.stringify(vm.raw),
       },
     }))
 }
@@ -100,13 +104,16 @@ export default function FlatMap({ onGlobeReady }) {
   const detectionMode = useAtlasStore((s) => s.detectionMode)
   const detectionLabelDensity = useAtlasStore((s) => s.detectionLabelDensity)
   const selectedEvent = useAtlasStore((s) => s.selectedEvent)
-  const { filterFlatMapEvents } = useGlobeLayerEvents()
-  const visibleEvents = useMemo(() => filterFlatMapEvents(), [filterFlatMapEvents])
-  const setSelectedMarker = useAtlasStore((s) => s.setSelectedMarker)
-  const setSelectedEvent = useAtlasStore((s) => s.setSelectedEvent)
+  // No field layers on the 2D map — skip GDELT geo overlay fetching entirely.
+  const { allMarkers } = useGlobeViewModels({ withFields: false })
+  const visibleEvents = useMemo(() => allMarkers.map((vm) => vm.raw), [allMarkers])
   const setZoomLevel = useAtlasStore((s) => s.setZoomLevel)
   const setOnResetView = useAtlasStore((s) => s.setOnResetView)
   const setOnFlyToLocation = useAtlasStore((s) => s.setOnFlyToLocation)
+
+  // Latest markers for the async map-load seed (init effect runs once).
+  const markersRef = useRef(allMarkers)
+  markersRef.current = allMarkers
 
   useShareCameraBridge({
     ready: mapReady,
@@ -366,7 +373,7 @@ export default function FlatMap({ onGlobeReady }) {
         if (evSrc && typeof evSrc.setData === 'function') {
           evSrc.setData({
             type: 'FeatureCollection',
-            features: buildEventFeatures(useAtlasStore.getState().events),
+            features: buildEventFeatures(markersRef.current),
           })
         }
 
@@ -377,23 +384,17 @@ export default function FlatMap({ onGlobeReady }) {
 
         setOnFlyToLocation((target) => {
           const m = mapRef.current
-          if (!m || !target) return
-          const { lat, lng, viewport, bbox } = target
-          const box = bbox || viewport
-          const centerLat = Number.isFinite(lat) ? lat : box ? (box.south + box.north) / 2 : NaN
-          const centerLng = Number.isFinite(lng) ? lng : box ? (box.west + box.east) / 2 : NaN
-          if (!Number.isFinite(centerLat) || !Number.isFinite(centerLng)) return
+          if (!m) return
+          const t = resolveFlyToTarget(target)
+          if (!t) return
           let zoom = 12
-          if (box) {
-            const latSpan = Math.abs(box.north - box.south)
-            const lngSpan = Math.abs(box.east - box.west)
-            const span = Math.max(latSpan, lngSpan)
-            if (span > 8) zoom = 5
-            else if (span > 2) zoom = 8
-            else if (span > 0.5) zoom = 10
+          if (t.spanDeg != null) {
+            if (t.spanDeg > 8) zoom = 5
+            else if (t.spanDeg > 2) zoom = 8
+            else if (t.spanDeg > 0.5) zoom = 10
             else zoom = 13
           }
-          m.flyTo({ center: [centerLng, centerLat], zoom, duration: 1400 })
+          m.flyTo({ center: [t.lng, t.lat], zoom, duration: 1400 })
         })
 
         setMapReady(true)
@@ -413,8 +414,7 @@ export default function FlatMap({ onGlobeReady }) {
         const props = e.features[0].properties
         if (props?._eventData) {
           try {
-            setSelectedEvent(JSON.parse(props._eventData))
-            setSelectedMarker(null)
+            applyMarkerClick(JSON.parse(props._eventData))
           } catch {
             /* ignore */
           }
@@ -441,7 +441,7 @@ export default function FlatMap({ onGlobeReady }) {
         map = null
       }
     }
-  }, [setOnResetView, setOnFlyToLocation, setSelectedEvent, setSelectedMarker, setZoomLevel])
+  }, [setOnResetView, setOnFlyToLocation, setZoomLevel])
 
   useEffect(() => {
     const m = mapRef.current
@@ -450,10 +450,10 @@ export default function FlatMap({ onGlobeReady }) {
     if (src && typeof src.setData === 'function') {
       src.setData({
         type: 'FeatureCollection',
-        features: buildEventFeatures(visibleEvents),
+        features: buildEventFeatures(allMarkers),
       })
     }
-  }, [visibleEvents])
+  }, [allMarkers])
 
   useEffect(() => {
     const m = mapRef.current

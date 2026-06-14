@@ -4,7 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/fetch-country-geojson.mjs && vite",
+    "geo:ensure": "node scripts/fetch-country-geojson.mjs",
+    "prebuild": "node scripts/fetch-country-geojson.mjs",
     "dev:api": "vercel dev --listen 3001",
     "build": "vite build",
     "prebuild:gdelt-lookups": "node scripts/build-gdelt-lookups.mjs",
@@ -20,6 +22,7 @@
   },
   "devDependencies": {
     "shpjs": "^6.2.0",
+    "supabase": "^2.106.0",
     "vercel": "^50.0.0",
     "vite": "^7.3.1"
   },

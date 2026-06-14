@@ -246,6 +246,8 @@ export const useAtlasStore = create((set, get) => ({
     loading: false,
     heatmapReady: false,
     choroplethReady: false,
+    choroplethError: null,
+    heatmapError: null,
     error: null,
   },
   /**

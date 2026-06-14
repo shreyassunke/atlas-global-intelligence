@@ -36,7 +36,11 @@ function loadCountryPolygons() {
   if (!countryPolygonsPromise) {
     countryPolygonsPromise = fetch(COUNTRY_POLYGONS_URL)
       .then((res) => {
-        if (!res.ok) throw new Error(`Country polygons HTTP ${res.status}`)
+        if (!res.ok) {
+          throw new Error(
+            `Country polygons missing (HTTP ${res.status}). Run: npm run geo:ensure`,
+          )
+        }
         return res.json()
       })
       .then((geojson) => {
@@ -54,6 +58,9 @@ function loadCountryPolygons() {
             name: String(props.NAME || props.ADMIN || ''),
           })
         }
+        if (!out.length) {
+          throw new Error('Country polygons file has no usable features — run: npm run geo:ensure')
+        }
         return out
       })
       .catch((err) => {
@@ -62,6 +69,17 @@ function loadCountryPolygons() {
       })
   }
   return countryPolygonsPromise
+}
+
+function friendlyHeatmapError(message) {
+  const msg = String(message || '')
+  if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+    return 'GDELT GEO API unreachable — rate limit or network; retry in a few minutes'
+  }
+  if (msg.includes('429') || msg.toLowerCase().includes('limit')) {
+    return 'GDELT GEO rate limited — retry in a few minutes'
+  }
+  return msg || 'GDELT heatmap unavailable'
 }
 
 export default function useGdeltGeoOverlay({ enabled = true } = {}) {
@@ -78,7 +96,8 @@ export default function useGdeltGeoOverlay({ enabled = true } = {}) {
   const [heatmapPoints, setHeatmapPoints] = useState([])
   const [countryPolygons, setCountryPolygons] = useState(null)
   const [heatLoading, setHeatLoading] = useState(false)
-  const [error, setError] = useState(null)
+  const [choroplethError, setChoroplethError] = useState(null)
+  const [heatmapError, setHeatmapError] = useState(null)
 
   const abortRef = useRef(null)
   const timerRef = useRef(null)
@@ -95,14 +114,24 @@ export default function useGdeltGeoOverlay({ enabled = true } = {}) {
   // ── Choropleth: bundled polygons + in-worker CAMEO country aggregates ──
 
   useEffect(() => {
-    if (!choroOn || countryPolygons) return
+    if (!choroOn) {
+      setChoroplethError(null)
+      return undefined
+    }
+    if (countryPolygons) return undefined
+
     let cancelled = false
     loadCountryPolygons()
       .then((polys) => {
-        if (!cancelled && mountedRef.current) setCountryPolygons(polys)
+        if (!cancelled && mountedRef.current) {
+          setCountryPolygons(polys)
+          setChoroplethError(null)
+        }
       })
       .catch((err) => {
-        if (!cancelled && mountedRef.current) setError(String(err?.message || err))
+        if (!cancelled && mountedRef.current) {
+          setChoroplethError(String(err?.message || err))
+        }
       })
     return () => {
       cancelled = true
@@ -144,6 +173,7 @@ export default function useGdeltGeoOverlay({ enabled = true } = {}) {
     if (!heatOn) {
       setHeatmapPoints([])
       setHeatLoading(false)
+      setHeatmapError(null)
       clearTimeout(debounceRef.current)
       return undefined
     }
@@ -166,9 +196,17 @@ export default function useGdeltGeoOverlay({ enabled = true } = {}) {
         })
         if (cancelled || !mountedRef.current) return
         setHeatmapPoints(res.heatmapPoints)
-        if (res.errors.length) setError(res.errors.join(' · '))
+        if (res.heatmapPoints.length > 0) {
+          setHeatmapError(res.errors.length ? res.errors.join(' · ') : null)
+        } else if (res.errors.length) {
+          setHeatmapError(friendlyHeatmapError(res.errors.join(' · ')))
+        } else {
+          setHeatmapError(null)
+        }
       } catch (e) {
-        if (!cancelled && mountedRef.current) setError(String(e?.message || e))
+        if (!cancelled && mountedRef.current) {
+          setHeatmapError(friendlyHeatmapError(e?.message || e))
+        }
       } finally {
         if (!cancelled && mountedRef.current) setHeatLoading(false)
       }
@@ -191,25 +229,44 @@ export default function useGdeltGeoOverlay({ enabled = true } = {}) {
 
   // ── Bootstrap readiness ──
 
+  const choroLoading = choroOn && !countryPolygons && !choroplethError
+  const choroplethReady = !choroOn || (Boolean(countryPolygons) && choroplethRows.length > 0)
+  const heatmapReady = !heatOn || heatmapPoints.length > 0
+
   useEffect(() => {
     if (!anyOn) {
       setGdeltGeoBootstrap({
         loading: false,
         heatmapReady: false,
         choroplethReady: false,
+        choroplethError: null,
+        heatmapError: null,
         error: null,
       })
       return
     }
-    const choroplethReady = !choroOn || choroplethRows.length > 0
-    const heatmapReady = !heatOn || heatmapPoints.length > 0
     setGdeltGeoBootstrap({
-      loading: heatLoading || (choroOn && !choroplethReady),
+      loading: heatLoading || choroLoading,
       heatmapReady,
       choroplethReady,
-      error,
+      choroplethError,
+      heatmapError,
+      error: null,
     })
-  }, [anyOn, choroOn, heatOn, choroplethRows.length, heatmapPoints.length, heatLoading, error, setGdeltGeoBootstrap])
+  }, [
+    anyOn,
+    choroOn,
+    heatOn,
+    choroplethRows.length,
+    heatmapPoints.length,
+    heatLoading,
+    choroLoading,
+    choroplethReady,
+    heatmapReady,
+    choroplethError,
+    heatmapError,
+    setGdeltGeoBootstrap,
+  ])
 
   const toneRange = useMemo(() => choroplethToneRange(choroplethRows), [choroplethRows])
 
@@ -217,7 +274,9 @@ export default function useGdeltGeoOverlay({ enabled = true } = {}) {
     heatmapPoints,
     choroplethRows,
     toneRange,
-    loading: heatLoading || (choroOn && choroplethRows.length === 0 && !error),
-    error,
+    loading: heatLoading || choroLoading,
+    error: choroplethError || heatmapError,
+    choroplethError,
+    heatmapError,
   }
 }

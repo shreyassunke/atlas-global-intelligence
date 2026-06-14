@@ -265,8 +265,8 @@ export function getLayerHealth(layerKey, ctx) {
 
   if (layerKey === 'gdeltHeatmap') {
     const geo = ctx.gdeltGeoBootstrap || {}
-    if (geo.error) return { tone: 'error', message: geo.error }
-    if (geo.loading) return { tone: 'warn', message: 'Loading heatmap…' }
+    if (geo.heatmapError) return { tone: 'error', message: geo.heatmapError }
+    if (geo.loading && !geo.heatmapReady) return { tone: 'warn', message: 'Loading heatmap…' }
     if (geo.heatmapReady) return { tone: 'ok', message: 'Heatmap active' }
     return { tone: 'empty', message: 'Feed OK — no heat points in view' }
   }
@@ -274,10 +274,13 @@ export function getLayerHealth(layerKey, ctx) {
   if (layerKey === 'gdeltChoropleth') {
     const geo = ctx.gdeltGeoBootstrap || {}
     const aggCount = Object.keys(ctx.gdeltCountryAggregates?.byFips || {}).length
-    if (geo.error) return { tone: 'error', message: geo.error }
+    if (geo.choroplethError) return { tone: 'error', message: geo.choroplethError }
     if (geo.loading && !geo.choroplethReady) return { tone: 'warn', message: 'Loading country tone…' }
     if (geo.choroplethReady || aggCount > 0) {
       return { tone: 'ok', message: aggCount > 0 ? `${aggCount} countries` : 'Choropleth active' }
+    }
+    if (aggCount === 0 && !geo.loading) {
+      return { tone: 'empty', message: 'Waiting for GDELT CAMEO export…' }
     }
     return { tone: 'empty', message: 'Waiting for GDELT export…' }
   }

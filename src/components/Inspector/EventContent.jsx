@@ -57,8 +57,102 @@ function timeAgo(dateStr) {
 
 export default function EventContent({ event, onClose }) {
   const openGdeltAnalytics = useAtlasStore((s) => s.openGdeltAnalytics)
-  // Phase 6 — first-class trust badge ("1 source · uncorroborated" /
-  // "4 independent feeds" / "sources disagree") + corroborating source list.
+  const activeWorkspaceId = useAtlasStore((s) => s.activeWorkspaceId)
+  const addEventToCanvas = useAtlasStore((s) => s.addEventToCanvas)
+  const openCanvas = useAtlasStore((s) => s.openCanvas)
+  const eventMap = useAtlasStore((s) => s.eventMap)
+  const selectEvent = useAtlasStore((s) => s.setSelectedEvent)
+
+  const inspectorMode = event?.inspectorMode
+    || (event?.refKind ? 'reference' : null)
+    || (event?.derivedFromAnomaly ? 'derived' : null)
+    || (event?.trackKind ? 'track' : 'event')
+
+  if (inspectorMode === 'reference') {
+    return (
+      <>
+        <div className="event-panel-header">
+          <div style={{ flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span className="atlas-archetype-chip atlas-archetype-chip--reference">Reference</span>
+              <span className="event-priority-indicator" style={{ opacity: 0.5 }}>STATIC</span>
+            </div>
+            <h3 className="event-panel-title">{event.title || event.refId}</h3>
+            <div className="event-panel-attribution">
+              {event.refKind === 'chokepoint' ? 'Maritime chokepoint' : 'Nuclear facility'}
+              {event.country ? ` · ${event.country}` : ''}
+              {event.region ? ` · ${event.region}` : ''}
+            </div>
+          </div>
+          <button className="feed-close-btn" onClick={onClose} style={{ marginLeft: 8, flexShrink: 0 }}>✕</button>
+        </div>
+        <div className="event-panel-body">
+          <div className="atlas-inspector-disclaimer">
+            Static context — not a live event. Reference markers are never scored for corroboration.
+          </div>
+          <div className="event-meta-grid">
+            <div className="event-meta-item">
+              <span className="event-meta-label">Coordinates</span>
+              <span className="event-meta-value">{event.lat?.toFixed(2)}°, {event.lng?.toFixed(2)}°</span>
+            </div>
+          </div>
+        </div>
+      </>
+    )
+  }
+
+  if (inspectorMode === 'derived') {
+    const conf = event.confidence || confidenceForEvent(event)
+    const linked = (event.linkedEventIds || []).map((id) => eventMap[id]).filter(Boolean)
+    return (
+      <>
+        <div className="event-panel-header">
+          <div style={{ flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span className="atlas-archetype-chip atlas-archetype-chip--derived">Derived</span>
+              <span className={`confidence-badge tone-${conf.tone}`}>{conf.label}</span>
+            </div>
+            <h3 className="event-panel-title">{event.title || 'Synthesized signal'}</h3>
+            <div className="event-panel-attribution">{event.anomalyType || 'Cross-feed synthesis'}</div>
+          </div>
+          <button className="feed-close-btn" onClick={onClose} style={{ marginLeft: 8, flexShrink: 0 }}>✕</button>
+        </div>
+        <div className="event-panel-body">
+          <div className="atlas-derived-why">
+            <span className="event-meta-label">Why</span>
+            <p>{event.why || 'Multiple feeds suggest a structural pattern worth analyst review.'}</p>
+          </div>
+          {linked.length > 0 && (
+            <div className="atlas-linked-events">
+              <span className="event-meta-label">Linked sources</span>
+              <div className="atlas-linked-chips">
+                {linked.map((evt) => (
+                  <button
+                    key={evt.id}
+                    type="button"
+                    className="atlas-linked-chip"
+                    onClick={() => selectEvent(evt)}
+                  >
+                    {evt.title?.slice(0, 48) || evt.id}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {event.lat != null && (
+            <div className="event-meta-item">
+              <span className="event-meta-label">Location</span>
+              <span className="event-meta-value">
+                {event.lat?.toFixed(2)}°, {event.lng?.toFixed(2)}°
+                {event.latApproximate ? ' (approximate)' : ''}
+              </span>
+            </div>
+          )}
+        </div>
+      </>
+    )
+  }
+
   const confidence = confidenceForEvent(event)
 
   return (
@@ -67,6 +161,11 @@ export default function EventContent({ event, onClose }) {
         <div style={{ flex: 1 }}>
           {/* Dimension badge — color-coded circle + civilian label */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {event.trackKind ? (
+              <span className="atlas-archetype-chip atlas-archetype-chip--track">Live telemetry</span>
+            ) : (
+              <span className="atlas-archetype-chip atlas-archetype-chip--pin">Incident pin</span>
+            )}
             <span
               className="event-dimension-badge"
               style={{
@@ -454,6 +553,19 @@ export default function EventContent({ event, onClose }) {
               title="Open the country dossier for this event's location"
             >
               ◉ Open Dossier
+            </button>
+          )}
+          {activeWorkspaceId && !event.trackKind && (
+            <button
+              type="button"
+              className="event-source-link"
+              style={{ flex: 1, minWidth: '110px', cursor: 'pointer', border: 'none', background: 'rgba(0, 207, 255, 0.10)' }}
+              onClick={() => {
+                if (addEventToCanvas(event)) openCanvas()
+              }}
+              title="Add this signal to the investigation canvas"
+            >
+              + Canvas
             </button>
           )}
           {event.sourceUrl && (

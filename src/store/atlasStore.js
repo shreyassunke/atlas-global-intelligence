@@ -14,6 +14,13 @@ import {
 } from '../core/eventBus'
 import { isLayerToggleOn } from '../core/layerCatalog'
 import { supabase } from '../services/supabase'
+import { resolveFocusBboxForIsoCodes } from '../core/workspaceMatch'
+import {
+  buildInvestigationFromWorkspace,
+  loadInvestigationForWorkspace,
+  saveInvestigationForWorkspace,
+} from '../core/investigationPersistence'
+import { eventToEvidence } from '../core/investigationSchema'
 const STORAGE_KEY_SOURCES = 'atlas_selected_sources'
 const STORAGE_KEY_ONBOARDED = 'atlas_onboarded'
 const STORAGE_KEY_DATA_LAYERS = 'atlas_data_layers'
@@ -33,6 +40,7 @@ const DEFAULT_DATA_LAYERS = {
   gdacs: true,           // GDACS disasters
   eonet: true,           // NASA EONET natural events
   nhcStorms: false,      // NOAA NHC active cyclone tracks + cone-of-error
+  conflictEvents: false, // ACLED + UCDP conflict pins (ACLED requires key)
   // ── field layers (aggregate surfaces) ──
   gdeltChoropleth: true, // GDELT per-country tone choropleth — the default monitor surface
   gdeltHeatmap: false,   // GDELT GEO PointHeatmap (noisy ghost dots; opt-in)
@@ -50,6 +58,11 @@ const DEFAULT_DATA_LAYERS = {
   gibsClouds: false,     // MODIS Aqua cloud fraction (day)
   gibsBlackMarble: false,// Enhance night-side city lights (Globe.GL)
   terminator: true,      // Day/night terminator line
+  // ── reference layers (static context) ──
+  referenceNuclear: false,
+  referenceChokepoints: false,
+  // ── derived layers (synthesized signals) ──
+  derivedSignals: false,
 }
 
 /**
@@ -224,6 +237,8 @@ export const useAtlasStore = create((set, get) => ({
   sourceCatalog: [],
   streetViewLocation: null,
   isStreetViewOpen: false,
+  /** When true, clicking the globe opens Street View (opt-in — not default). */
+  streetViewMode: false,
   /** { videoId, title, url, isLive } | null — when set, YouTube embed overlay is shown */
   youtubeEmbed: null,
 
@@ -283,6 +298,17 @@ export const useAtlasStore = create((set, get) => ({
   /** 'auth' | 'sources' — tracks which sub-step of onboarding the user is on */
   onboardingStep: 'auth',
 
+  // ── Investigation Workstation ──
+  /** 'dashboard' | 'workstation' — auth users land on dashboard */
+  appView: 'dashboard',
+  workspaces: [],
+  workspacesLoading: false,
+  activeWorkspaceId: null,
+  workspaceEvents: [],
+  workspaceEventsLoading: false,
+  /** Active investigation document (canvas + evidence) for the open workspace */
+  investigation: null,
+
   // ── Phase 5 — shareable URL / watchlists / toasts ──
   /** Camera snapshot encoded in share URLs */
   shareCamera: null,
@@ -301,7 +327,7 @@ export const useAtlasStore = create((set, get) => ({
    * Opening one inspector content replaces the previous; Escape closes top-most
    * (modal → workbench → inspector) via closeTopPanel().
    */
-  ui: { inspector: null, workbench: null },
+  ui: { inspector: null, workbench: null, reportExportOpen: false },
 
   // ── Quality & Globe Renderer ──
   /** 'cesium' | 'globegl' | 'leaflet' */
@@ -364,7 +390,11 @@ export const useAtlasStore = create((set, get) => ({
 
   completeOnboarding: () => {
     localStorage.setItem(STORAGE_KEY_ONBOARDED, 'true')
-    set({ hasCompletedOnboarding: true })
+    const user = get().user
+    set({
+      hasCompletedOnboarding: true,
+      ...(user && !get().activeWorkspaceId ? { appView: 'dashboard' } : {}),
+    })
   },
 
   acknowledgeLanding: () => set({ landingAcknowledged: true }),
@@ -436,6 +466,18 @@ export const useAtlasStore = create((set, get) => ({
     })),
   closeStreetView: () => set(() => ({ isStreetViewOpen: false })),
 
+  toggleStreetViewMode: () => set((s) => {
+    const next = !s.streetViewMode
+    if (next) {
+      s.pushToast({
+        label: 'Street View',
+        message: 'Street View mode on — click the globe to open a panorama',
+      })
+    }
+    return { streetViewMode: next }
+  }),
+  setStreetViewMode: (enabled) => set({ streetViewMode: Boolean(enabled) }),
+
   openYouTubeEmbed: ({ videoId, title = '', url = '', isLive = false }) =>
     set(() => ({
       youtubeEmbed: { videoId, title, url, isLive },
@@ -487,27 +529,50 @@ export const useAtlasStore = create((set, get) => ({
    * FIPS 10-4 (joins to gdeltCountryAggregates + BigQuery templates).
    */
   dossier: null,
+  /** Country selected by globe click — drives macro HUD without opening Workbench. */
+  selectedPlace: null,
+  setSelectedPlace: (place) => set({ selectedPlace: place || null }),
   /** Open the Dossier tab focused on a country (any entry point). */
-  openDossier: (target) => {
+  openDossier: (target, options = {}) => {
+    const { openWorkbench = true } = options
     if (!target || (!target.fips && !target.name)) return
+    const place = {
+      fips: target.fips || '',
+      iso: target.iso || '',
+      name: target.name || target.iso || target.fips,
+      lat: Number.isFinite(target.lat) ? target.lat : null,
+      lng: Number.isFinite(target.lng) ? target.lng : null,
+    }
     set((s) => ({
-      dossier: {
-        fips: target.fips || '',
-        iso: target.iso || '',
-        name: target.name || target.iso || target.fips,
-        lat: Number.isFinite(target.lat) ? target.lat : null,
-        lng: Number.isFinite(target.lng) ? target.lng : null,
-      },
-      ui: { ...s.ui, workbench: 'dossier' },
+      dossier: place,
+      selectedPlace: place,
+      ...(openWorkbench ? { ui: { ...s.ui, workbench: 'dossier' } } : {}),
     }))
   },
-  clearDossier: () => set({ dossier: null }),
+  clearDossier: () => set({ dossier: null, selectedPlace: null }),
 
   // ── Panel coordinator actions ──
   openWorkbench: (tab) => set((s) => ({ ui: { ...s.ui, workbench: tab } })),
-  closeWorkbench: () => set((s) => ({ ui: { ...s.ui, workbench: null } })),
+  closeWorkbench: () => set((s) => ({ ui: { ...s.ui, workbench: null, reportExportOpen: false } })),
   toggleWorkbench: (tab) => set((s) => ({
-    ui: { ...s.ui, workbench: s.ui.workbench === tab ? null : tab },
+    ui: { ...s.ui, workbench: s.ui.workbench === tab ? null : tab, reportExportOpen: false },
+  })),
+
+  /** Phase 3 — open Dossier tab with industry report export panel */
+  openReportExport: () => {
+    const s = get()
+    set({
+      ui: { ...s.ui, workbench: 'dossier', reportExportOpen: true },
+    })
+    if (!s.dossier) {
+      s.pushToast({
+        label: 'Export',
+        message: 'Open a country dossier first — click a country on the tone map or search a place',
+      })
+    }
+  },
+  clearReportExportRequest: () => set((s) => ({
+    ui: { ...s.ui, reportExportOpen: false },
   })),
 
   closeInspector: () => set((s) => {
@@ -791,11 +856,291 @@ export const useAtlasStore = create((set, get) => ({
   },
 
   // ── Auth Actions ──
-  setUser: (user) => set({ user }),
+  setUser: (user) => {
+    if (!user) {
+      set({ user: null })
+      return
+    }
+    const { activeWorkspaceId } = get()
+    set({
+      user,
+      appView: activeWorkspaceId ? 'workstation' : 'dashboard',
+    })
+  },
   setOnboardingStep: (step) => set({ onboardingStep: step }),
 
   signOut: async () => {
     if (supabase) await supabase.auth.signOut()
-    set({ user: null })
+    set({
+      user: null,
+      appView: 'dashboard',
+      activeWorkspaceId: null,
+      workspaceEvents: [],
+      investigation: null,
+      workspaces: [],
+    })
+  },
+
+  // ── Workstation Actions ──
+  setAppView: (view) => set({ appView: view }),
+
+  getActiveWorkspace: () => {
+    const { workspaces, activeWorkspaceId } = get()
+    return workspaces.find((w) => w.id === activeWorkspaceId) || null
+  },
+
+  loadWorkspaces: async () => {
+    const { user } = get()
+    if (!user || !supabase) return
+    set({ workspacesLoading: true })
+    const { data, error } = await supabase
+      .from('workspaces')
+      .select('*')
+      .eq('user_id', user.id)
+      .neq('status', 'archived')
+      .order('updated_at', { ascending: false })
+    if (!error) set({ workspaces: data || [], workspacesLoading: false })
+    else set({ workspacesLoading: false })
+  },
+
+  loadWorkspaceEvents: async (workspaceId) => {
+    if (!workspaceId || !supabase) return
+    set({ workspaceEventsLoading: true })
+    const { data, error } = await supabase
+      .from('workspace_events')
+      .select('*')
+      .eq('workspace_id', workspaceId)
+      .order('captured_at', { ascending: false })
+      .limit(500)
+    if (!error) set({ workspaceEvents: data || [], workspaceEventsLoading: false })
+    else set({ workspaceEventsLoading: false })
+  },
+
+  applyWorkspaceConfig: (workspace) => {
+    if (!workspace) return
+    const dims = workspace.active_dimensions?.length
+      ? new Set(workspace.active_dimensions)
+      : new Set(DEFAULT_DIMENSIONS)
+    const layers = workspace.data_layers && Object.keys(workspace.data_layers).length
+      ? { ...get().dataLayers, ...workspace.data_layers }
+      : get().dataLayers
+    persistDataLayers(layers)
+    set({
+      activeDimensions: dims,
+      priorityFilter: workspace.priority_filter || 'p1p2',
+      dataLayers: layers,
+    })
+    localStorage.setItem('atlas_priority_filter', workspace.priority_filter || 'p1p2')
+    const bbox = workspace.focus_bbox
+    if (bbox?.lat != null && bbox?.lng != null) {
+      get().flyToLocation({
+        lat: bbox.lat,
+        lng: bbox.lng,
+        rangeM: bbox.rangeM || 2_500_000,
+      })
+    }
+    if (get().eventBusReady) reconcileLayerSources(layers)
+  },
+
+  openWorkspace: async (id) => {
+    let ws = get().workspaces.find((w) => w.id === id)
+    if (!ws && supabase) {
+      const { data } = await supabase.from('workspaces').select('*').eq('id', id).maybeSingle()
+      if (data) {
+        ws = data
+        set((s) => ({
+          workspaces: s.workspaces.some((w) => w.id === id) ? s.workspaces : [data, ...s.workspaces],
+        }))
+      }
+    }
+    if (!ws) return
+    let investigation = loadInvestigationForWorkspace(id)
+    if (!investigation) investigation = buildInvestigationFromWorkspace(ws)
+    set({
+      activeWorkspaceId: id,
+      appView: 'workstation',
+      investigation,
+      ui: { inspector: null, workbench: null, reportExportOpen: false },
+    })
+    get().applyWorkspaceConfig(ws)
+    await get().loadWorkspaceEvents(id)
+    get().pushToast({ label: 'Workstation', message: `Opened ${ws.name}` })
+  },
+
+  exitWorkspace: () => {
+    const { activeWorkspaceId, investigation } = get()
+    if (activeWorkspaceId && investigation) {
+      saveInvestigationForWorkspace(activeWorkspaceId, investigation)
+    }
+    set({
+      appView: 'dashboard',
+      activeWorkspaceId: null,
+      workspaceEvents: [],
+      investigation: null,
+      selectedEvent: null,
+      ui: { inspector: null, workbench: null, reportExportOpen: false },
+    })
+  },
+
+  createWorkspace: async (payload) => {
+    const { user } = get()
+    if (!user || !supabase) return null
+    const focusBbox = payload.focus_regions?.length
+      ? await resolveFocusBboxForIsoCodes(payload.focus_regions)
+      : null
+    const row = {
+      user_id: user.id,
+      name: payload.name.trim(),
+      description: payload.description?.trim() || null,
+      focus_regions: payload.focus_regions || [],
+      keywords: payload.keywords || [],
+      active_dimensions: payload.active_dimensions?.length
+        ? payload.active_dimensions
+        : [...DEFAULT_DIMENSIONS],
+      priority_filter: payload.priority_filter || 'p1p2',
+      data_layers: payload.data_layers || { ...DEFAULT_DATA_LAYERS },
+      focus_bbox: focusBbox,
+      status: 'monitoring',
+    }
+    const { data, error } = await supabase.from('workspaces').insert(row).select().single()
+    if (error) {
+      get().pushToast({ label: 'Workspace', message: error.message || 'Could not create workspace' })
+      return null
+    }
+    set((s) => ({ workspaces: [data, ...s.workspaces] }))
+    get().pushToast({ label: 'Workspace', message: `Created ${data.name}` })
+    return data
+  },
+
+  updateWorkspace: async (id, patch) => {
+    if (!supabase) return false
+    const updates = { ...patch, updated_at: new Date().toISOString() }
+    if (patch.focus_regions) {
+      updates.focus_bbox = await resolveFocusBboxForIsoCodes(patch.focus_regions)
+    }
+    const { error } = await supabase.from('workspaces').update(updates).eq('id', id)
+    if (error) {
+      get().pushToast({ label: 'Workspace', message: error.message })
+      return false
+    }
+    set((s) => ({
+      workspaces: s.workspaces.map((w) => (w.id === id ? { ...w, ...updates } : w)),
+    }))
+    if (get().activeWorkspaceId === id) get().applyWorkspaceConfig(get().getActiveWorkspace())
+    return true
+  },
+
+  archiveWorkspace: async (id) => {
+    if (!supabase) return
+    await supabase.from('workspaces').update({ status: 'archived', updated_at: new Date().toISOString() }).eq('id', id)
+    set((s) => ({ workspaces: s.workspaces.filter((w) => w.id !== id) }))
+    if (get().activeWorkspaceId === id) get().exitWorkspace()
+    get().pushToast({ label: 'Workspace', message: 'Workspace archived' })
+  },
+
+  duplicateWorkspace: async (id) => {
+    const src = get().workspaces.find((w) => w.id === id)
+    if (!src) return null
+    return get().createWorkspace({
+      name: `${src.name} (copy)`,
+      description: src.description,
+      focus_regions: src.focus_regions,
+      keywords: src.keywords,
+      active_dimensions: src.active_dimensions,
+      priority_filter: src.priority_filter,
+      data_layers: src.data_layers,
+    })
+  },
+
+  appendWorkspaceEvent: (row) => {
+    set((s) => {
+      if (s.workspaceEvents.some((e) => e.event_id === row.event_id)) return s
+      return { workspaceEvents: [row, ...s.workspaceEvents].slice(0, 500) }
+    })
+  },
+
+  persistInvestigation: () => {
+    const { activeWorkspaceId, investigation } = get()
+    if (activeWorkspaceId && investigation) {
+      saveInvestigationForWorkspace(activeWorkspaceId, investigation)
+    }
+  },
+
+  setInvestigation: (investigation) => {
+    set({ investigation })
+    get().persistInvestigation()
+  },
+
+  addEvidenceToCanvas: (item) => {
+    const inv = get().investigation
+    if (!inv) {
+      get().pushToast({ label: 'Canvas', message: 'Open a workspace to build an investigation' })
+      return false
+    }
+    if (inv.evidence.some((e) => e.id === item.id)) {
+      get().pushToast({ label: 'Canvas', message: 'Already on canvas' })
+      return false
+    }
+    const next = {
+      ...inv,
+      evidence: [...inv.evidence, item],
+      audit: { ...inv.audit, updatedAt: new Date().toISOString(), revision: (inv.audit.revision || 1) + 1 },
+    }
+    get().setInvestigation(next)
+    get().pushToast({ label: 'Canvas', message: `Added "${item.title?.slice(0, 40) || 'signal'}"` })
+    return true
+  },
+
+  addEventToCanvas: (event) => {
+    if (!event) return false
+    return get().addEvidenceToCanvas(eventToEvidence(event))
+  },
+
+  removeEvidenceFromCanvas: (evidenceId) => {
+    const inv = get().investigation
+    if (!inv) return
+    const next = {
+      ...inv,
+      evidence: inv.evidence.filter((e) => e.id !== evidenceId),
+      connections: inv.connections.filter((c) => c.from !== evidenceId && c.to !== evidenceId),
+      audit: { ...inv.audit, updatedAt: new Date().toISOString(), revision: (inv.audit.revision || 1) + 1 },
+    }
+    get().setInvestigation(next)
+  },
+
+  addCanvasConnection: (connection) => {
+    const inv = get().investigation
+    if (!inv) return
+    const exists = inv.connections.some(
+      (c) => (c.from === connection.from && c.to === connection.to)
+        || (c.from === connection.to && c.to === connection.from),
+    )
+    if (exists) return
+    const next = {
+      ...inv,
+      connections: [...inv.connections, { ...connection, id: connection.id || crypto.randomUUID() }],
+      audit: { ...inv.audit, updatedAt: new Date().toISOString(), revision: (inv.audit.revision || 1) + 1 },
+    }
+    get().setInvestigation(next)
+    get().pushToast({ label: 'Canvas', message: `Link added — ${connection.label || connection.type}` })
+  },
+
+  removeCanvasConnection: (connectionId) => {
+    const inv = get().investigation
+    if (!inv) return
+    get().setInvestigation({
+      ...inv,
+      connections: inv.connections.filter((c) => c.id !== connectionId),
+      audit: { ...inv.audit, updatedAt: new Date().toISOString(), revision: (inv.audit.revision || 1) + 1 },
+    })
+  },
+
+  openCanvas: () => {
+    const s = get()
+    if (!s.activeWorkspaceId) {
+      s.pushToast({ label: 'Canvas', message: 'Open a workspace first' })
+      return
+    }
+    set({ ui: { ...s.ui, workbench: 'canvas' } })
   },
 }))

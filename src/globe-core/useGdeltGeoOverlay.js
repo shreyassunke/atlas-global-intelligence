@@ -26,50 +26,8 @@ import {
 const HEATMAP_REFRESH_MS = 15 * 60 * 1000
 const HEATMAP_TOGGLE_DEBOUNCE_MS = 300
 
-/** Same bundled Natural Earth asset used by `src/map/mapColoring.js` (GEO_URLS.country). */
-const COUNTRY_POLYGONS_URL = '/geo/ne_110m_admin_0_countries.geojson'
-
 /** Module-level cache — the polygon mesh is static and shared across renderer remounts. */
-let countryPolygonsPromise = null
-
-function loadCountryPolygons() {
-  if (!countryPolygonsPromise) {
-    countryPolygonsPromise = fetch(COUNTRY_POLYGONS_URL)
-      .then((res) => {
-        if (!res.ok) {
-          throw new Error(
-            `Country polygons missing (HTTP ${res.status}). Run: npm run geo:ensure`,
-          )
-        }
-        return res.json()
-      })
-      .then((geojson) => {
-        const out = []
-        for (const f of geojson?.features || []) {
-          const g = f?.geometry
-          if (!g || (g.type !== 'Polygon' && g.type !== 'MultiPolygon')) continue
-          const props = f.properties || {}
-          const fips = String(props.FIPS_10 || '').trim().toUpperCase()
-          if (!fips || fips === '-99') continue
-          out.push({
-            geometry: g,
-            fips,
-            iso: String(props.ISO_A2_EH || props.ISO_A2 || ''),
-            name: String(props.NAME || props.ADMIN || ''),
-          })
-        }
-        if (!out.length) {
-          throw new Error('Country polygons file has no usable features — run: npm run geo:ensure')
-        }
-        return out
-      })
-      .catch((err) => {
-        countryPolygonsPromise = null
-        throw err
-      })
-  }
-  return countryPolygonsPromise
-}
+import { loadCountryPolygons } from '../services/countryIndex.js'
 
 function friendlyHeatmapError(message) {
   const msg = String(message || '')

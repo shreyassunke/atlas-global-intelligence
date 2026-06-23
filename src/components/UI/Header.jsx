@@ -81,6 +81,15 @@ const IconResetView = () => (
   </svg>
 )
 
+const IconWorkspaces = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="7" height="7" rx="1" />
+    <rect x="14" y="3" width="7" height="7" rx="1" />
+    <rect x="3" y="14" width="7" height="7" rx="1" />
+    <rect x="14" y="14" width="7" height="7" rx="1" />
+  </svg>
+)
+
 const IconSearch = () => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="11" cy="11" r="8" />
@@ -122,6 +131,8 @@ function FilterStrip() {
   const setPriorityFilter = useAtlasStore((s) => s.setPriorityFilter)
   const timeFilter = useAtlasStore((s) => s.timeFilter)
   const setTimeFilter = useAtlasStore((s) => s.setTimeFilter)
+  const streetViewMode = useAtlasStore((s) => s.streetViewMode)
+  const toggleStreetViewMode = useAtlasStore((s) => s.toggleStreetViewMode)
   const mobileMode = useAtlasStore((s) => s.mobileMode)
 
   return (
@@ -179,11 +190,24 @@ function FilterStrip() {
           </button>
         ))}
       </div>
+
+      <span className="hud-strip-divider" aria-hidden />
+
+      <button
+        type="button"
+        className={`hud-strip-btn hud-strip-btn--streetview${streetViewMode ? ' active' : ''}`}
+        onClick={toggleStreetViewMode}
+        title={streetViewMode
+          ? 'Street View mode on — click globe for panorama (click to disable)'
+          : 'Enable Street View mode — then click the globe to open a panorama'}
+      >
+        {mobileMode ? 'SV' : 'Street View'}
+      </button>
     </motion.div>
   )
 }
 
-export default function Header({ hudHidden = false, onToggleHud }) {
+export default function Header({ hudHidden = false, onToggleHud, inWorkspace = false }) {
   const isLoading = useAtlasStore((s) => s.isLoading)
   const workbench = useAtlasStore((s) => s.ui.workbench)
   const toggleWorkbench = useAtlasStore((s) => s.toggleWorkbench)
@@ -194,9 +218,17 @@ export default function Header({ hudHidden = false, onToggleHud }) {
   const manualRefreshUsedToday = useAtlasStore((s) => s.manualRefreshUsedToday)
   const selectedSources = useAtlasStore((s) => s.selectedSources)
   const mobileMode = useAtlasStore((s) => s.mobileMode)
+  const user = useAtlasStore((s) => s.user)
+  const workspaces = useAtlasStore((s) => s.workspaces)
+  const activeWorkspaceId = useAtlasStore((s) => s.activeWorkspaceId)
+  const exitWorkspace = useAtlasStore((s) => s.exitWorkspace)
+  const openCanvas = useAtlasStore((s) => s.openCanvas)
+  const setAppView = useAtlasStore((s) => s.setAppView)
+  const activeWorkspace = workspaces.find((w) => w.id === activeWorkspaceId)
   const [moreOpen, setMoreOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const pushToast = useAtlasStore((s) => s.pushToast)
+  const openReportExport = useAtlasStore((s) => s.openReportExport)
   const unseenTriage = useAtlasStore((s) => countUnseenP1(s.events, s.triageLastSeenAt))
 
   const handleCopyShareLink = async () => {
@@ -213,6 +245,7 @@ export default function Header({ hudHidden = false, onToggleHud }) {
       shareCamera: state.shareCamera,
       zoomLevel: state.zoomLevel,
       selectedEventId: state.selectedEvent?.id ?? null,
+      workspaceId: state.activeWorkspaceId || null,
     })
     pushToast({
       label: 'Share',
@@ -282,6 +315,13 @@ export default function Header({ hudHidden = false, onToggleHud }) {
             {isLoading && (
               <span className="hud-loading-pulse">Syncing</span>
             )}
+
+            {inWorkspace && activeWorkspace && (
+              <div className="hud-workspace-chip">
+                <span className="hud-workspace-chip__pulse" />
+                <span className="hud-workspace-chip__name">{activeWorkspace.name}</span>
+              </div>
+            )}
           </div>
 
           <HeaderSearchBar />
@@ -299,6 +339,39 @@ export default function Header({ hudHidden = false, onToggleHud }) {
               screens. Desktop keeps the full, faster-access icon row. */}
           {!mobileMode && (
             <>
+              {user && !inWorkspace && (
+                <button
+                  type="button"
+                  className="hud-workspaces-pill"
+                  onClick={() => setAppView('dashboard')}
+                  title="Create or open an investigation workspace"
+                >
+                  Workspaces
+                </button>
+              )}
+
+              {user && inWorkspace && (
+                <button
+                  type="button"
+                  className="hud-workspaces-pill hud-workspaces-pill--active"
+                  onClick={exitWorkspace}
+                  title="Back to workspace list"
+                >
+                  Exit
+                </button>
+              )}
+
+              {inWorkspace && (
+                <button
+                  type="button"
+                  className={`hud-icon-btn ${workbench === 'canvas' ? 'active' : ''}`}
+                  onClick={openCanvas}
+                  title="Investigation canvas"
+                >
+                  <IconCompass />
+                </button>
+              )}
+
               <button
                 onClick={() => toggleWorkbench('triage')}
                 className={`hud-icon-btn hud-icon-btn-badged ${workbench === 'triage' ? 'active' : ''}`}
@@ -338,6 +411,16 @@ export default function Header({ hudHidden = false, onToggleHud }) {
             </>
           )}
 
+          {mobileMode && user && !inWorkspace && (
+            <button
+              type="button"
+              className="hud-workspaces-pill hud-workspaces-pill--compact"
+              onClick={() => setAppView('dashboard')}
+            >
+              Workspaces
+            </button>
+          )}
+
           <HeaderUserMenu />
 
           {!mobileMode && <div className="hud-separator" />}
@@ -361,6 +444,23 @@ export default function Header({ hudHidden = false, onToggleHud }) {
                   exit={{ opacity: 0, y: -6, scale: 0.96 }}
                   transition={{ duration: 0.15 }}
                 >
+                  {user && (
+                    <>
+                      <button
+                        type="button"
+                        className="hud-dropdown-item"
+                        onClick={() => {
+                          if (inWorkspace) exitWorkspace()
+                          else setAppView('dashboard')
+                          setMoreOpen(false)
+                        }}
+                      >
+                        <IconWorkspaces />
+                        <span>{inWorkspace ? 'Back to workspaces' : 'Workspaces — create & open'}</span>
+                      </button>
+                      <div className="hud-dropdown-divider" />
+                    </>
+                  )}
                   {mobileMode && (
                     <>
                       <button
@@ -425,6 +525,13 @@ export default function Header({ hudHidden = false, onToggleHud }) {
                   >
                     <IconSearch />
                     <span>Export Brief (PDF)</span>
+                  </button>
+                  <button
+                    className="hud-dropdown-item"
+                    onClick={() => { openReportExport(); setMoreOpen(false) }}
+                  >
+                    <IconSearch />
+                    <span>Export Report (Templates)</span>
                   </button>
                   <div className="hud-dropdown-divider" />
                   <button

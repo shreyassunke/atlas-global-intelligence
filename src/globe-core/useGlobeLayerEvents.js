@@ -6,7 +6,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAtlasStore } from '../store/atlasStore'
 import { isLayerToggleOn } from '../core/layerCatalog'
-import { eventSourceToGlobeDataLayerKey } from '../core/globeLayers'
+import {
+  eventSourceToGlobeDataLayerKey,
+  hasPreciseGeolocation,
+} from '../core/globeLayers'
 import { propagateTle } from '../core/satellitePropagation'
 import {
   isWorldZoom,
@@ -80,10 +83,9 @@ export function useGlobeLayerEvents() {
     const now = Date.now()
     for (const evt of events) {
       if (evt.trackKind === 'aircraft' || evt.trackKind === 'satellite' || evt.trackKind === 'vessel' || evt.trackKind === 'storm') continue
-      if (evt.lat == null || evt.lng == null) continue
-      if (evt.lat === 0 && evt.lng === 0 && evt.latApproximate) continue
+      if (!hasPreciseGeolocation(evt)) continue
 
-      const layerKey = eventSourceToGlobeDataLayerKey(evt.source)
+      const layerKey = eventSourceToGlobeDataLayerKey(evt)
       if (!layerKey || !isLayerEnabled(dataLayers, layerKey)) continue
       if (!dims.has(evt.dimension)) continue
       if (worldZoom && evt.priority === 'p3') continue // LOD: P1/P2 only at world zoom
@@ -120,7 +122,7 @@ export function useGlobeLayerEvents() {
       .filter((evt) => {
         if (evt.trackKind !== 'aircraft') return false
         if (evt.isMilitary && !showMil) return false
-        return evt.lat != null && evt.lng != null
+        return hasPreciseGeolocation(evt)
       })
       .slice(0, MAX_TACTICAL_AIRCRAFT)
   }, [events, dataLayers])
@@ -128,7 +130,7 @@ export function useGlobeLayerEvents() {
   const tacticalVessels = useMemo(() => {
     if (!isLayerEnabled(dataLayers, 'ais')) return []
     return events
-      .filter((evt) => evt.trackKind === 'vessel' && evt.lat != null && evt.lng != null)
+      .filter((evt) => evt.trackKind === 'vessel' && hasPreciseGeolocation(evt))
       .slice(0, MAX_TACTICAL_VESSELS)
   }, [events, dataLayers])
 

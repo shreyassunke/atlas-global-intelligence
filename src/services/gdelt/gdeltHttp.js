@@ -26,8 +26,14 @@
  * 429 so the rate-limit window clears before the next caller runs.
  */
 
+import { gdeltApiProxyUrl } from '../../utils/gdeltProxyUrl.js'
+
 /** Per their docs, GDELT asks for ≥5s between requests from the same origin. */
 export const GDELT_REQUEST_GAP_MS = 5500
+
+function resolveGdeltFetchUrl(url) {
+  return gdeltApiProxyUrl(url)
+}
 
 /** Extra wait after a 429 so the shared window is definitely clear. */
 const GDELT_BACKOFF_AFTER_429_MS = 9000
@@ -153,7 +159,7 @@ export async function fetchGdeltJson(url, { signal, timeoutMs = GDELT_DEFAULT_TI
   return withGdeltGate(async () => {
     const { signal: gated, cleanup } = withTimeout(signal, timeoutMs)
     try {
-      const res = await fetch(url, { signal: gated })
+      const res = await fetch(resolveGdeltFetchUrl(url), { signal: gated })
       if (res.status === 429) {
         markGdeltRateLimited()
         throw new Error('GDELT HTTP 429 (rate-limited)')
@@ -186,7 +192,7 @@ export async function fetchGdeltText(url, { signal, timeoutMs = GDELT_DEFAULT_TI
   return withGdeltGate(async () => {
     const { signal: gated, cleanup } = withTimeout(signal, timeoutMs)
     try {
-      const res = await fetch(url, { signal: gated })
+      const res = await fetch(resolveGdeltFetchUrl(url), { signal: gated })
       if (res.status === 429) {
         markGdeltRateLimited()
         throw new Error('GDELT HTTP 429 (rate-limited)')

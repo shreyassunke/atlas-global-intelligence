@@ -1,13 +1,12 @@
 /**
  * TheNewsAPI adapter - headlines endpoint.
  * https://www.thenewsapi.com/documentation
- * Returns data grouped by category; we flatten and normalize.
  *
- * OPTIMISED: fires all locale requests with Promise.all instead of sequential
- * loop, with AbortController timeouts.
+ * Production uses /api/news-proxy (server-side key, no CORS).
  */
 
 import { normalizeTheNewsApiArticle } from '../normalizer'
+import { newsProxyUrl, useNewsProxy } from '../../../utils/newsProxyUrl.js'
 
 const THENEWSAPI_COUNTRIES = ['us', 'gb', 'in', 'au', 'ca', 'de', 'fr', 'jp', 'cn', 'br', 'mx', 'za', 'ng', 'eg', 'ae', 'sa', 'il', 'ru', 'ua', 'kr', 'sg', 'hk', 'tw', 'id', 'my', 'th', 'ph', 'pk', 'tr', 'it', 'es', 'nl', 'pl', 'ar', 'co', 'cl', 'pe']
 const DEFAULT_LOCALES = ['us', 'gb', 'au', 'in', 'ca', 'de', 'fr', 'jp', 'br', 'mx', 'za', 'ng', 'eg', 'ae', 'sa', 'il', 'ru', 'ua', 'kr', 'sg', 'hk', 'tw', 'id', 'pk', 'tr', 'it', 'es', 'nl', 'ar', 'co', 'cl', 'pe']
@@ -16,6 +15,7 @@ const FETCH_TIMEOUT_MS = 8000
 
 export function isRateLimited(res, data) {
   if (res?.status === 429) return true
+  if (res?.status === 402) return true
   if (data?.message?.toLowerCase?.().includes('limit')) return true
   return false
 }
@@ -49,21 +49,24 @@ function flattenHeadlinesResponse(data) {
   return articles
 }
 
-/** Fetch a single locale batch with timeout */
 async function fetchLocale(apiKey, locale, headlinesPerCategory) {
-  const params = new URLSearchParams({
-    api_token: apiKey,
+  const params = {
     locale,
     language: 'en',
     headlines_per_category: String(headlinesPerCategory),
-  })
+  }
+
+  const url = useNewsProxy()
+    ? newsProxyUrl('thenewsapi', params)
+    : (() => {
+        const sp = new URLSearchParams({ ...params, api_token: apiKey })
+        return `https://api.thenewsapi.com/v1/news/headlines?${sp}`
+      })()
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
   try {
-    const res = await fetch(`https://api.thenewsapi.com/v1/news/headlines?${params}`, {
-      signal: controller.signal,
-    })
+    const res = await fetch(url, { signal: controller.signal })
     clearTimeout(timer)
     const data = await res.json()
     if (isRateLimited(res, data)) return { rateLimited: true, articles: [] }
@@ -85,14 +88,12 @@ export async function fetchTheNewsApi(apiKey, {
   const hinted = getCountriesFromSources(selectedSources, catalog)
   const localeList = uniq([...hinted, ...DEFAULT_LOCALES]).filter((cc) => THENEWSAPI_COUNTRIES.includes(cc))
 
-  // Build locale groups
   const localeGroups = []
   for (let i = 0; i < localeList.length && localeGroups.length < maxLocaleRequests; i += localesPerRequest) {
     const locale = localeList.slice(i, i + localesPerRequest).join(',')
     if (locale) localeGroups.push(locale)
   }
 
-  // Fire ALL locale requests in parallel
   const results = await Promise.all(
     localeGroups.map((locale) => fetchLocale(apiKey, locale, headlinesPerCategory)),
   )

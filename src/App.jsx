@@ -20,10 +20,16 @@ import useAtlasUrlSync from './hooks/useAtlasUrlSync'
 import useWatchlistAlerts from './hooks/useWatchlistAlerts'
 import useSurgeAlerts from './hooks/useSurgeAlerts'
 import useAlertDispatch from './hooks/useAlertDispatch'
+import useWorkspaceEventCapture from './hooks/useWorkspaceEventCapture'
 import ToastHost from './components/UI/ToastHost'
+import PlaceIndicatorStrip from './components/UI/PlaceIndicatorStrip'
+import FieldLegendPill from './components/Globe/FieldLegendPill'
 import { supabase } from './services/supabase'
+import { loadCountryPolygons } from './services/countryIndex'
 import { LANDMARK_SHORTCUT_KEYS } from './config/landmarkPresets'
 import LandingPage from './components/Landing/LandingPage'
+import WorkspaceDashboard from './components/Workspace/WorkspaceDashboard'
+import WorkspaceTimeline from './components/Workspace/WorkspaceTimeline'
 
 // Lazy-load heavy 3D components — Google Map3D / globe.gl / Leaflet are loaded after onboarding.
 const GoogleGlobe = lazy(() => import('./components/Globe/GoogleGlobe'))
@@ -69,6 +75,10 @@ export default function App() {
   const lastSunAngleRef = useRef(0)
   const globeMode = useAtlasStore((s) => s.globeMode)
   const tacticalMode = useAtlasStore((s) => s.tacticalMode)
+  const user = useAtlasStore((s) => s.user)
+  const appView = useAtlasStore((s) => s.appView)
+  const activeWorkspaceId = useAtlasStore((s) => s.activeWorkspaceId)
+  const loadWorkspaces = useAtlasStore((s) => s.loadWorkspaces)
   const initEventBusSystem = useAtlasStore((s) => s.initEventBusSystem)
   const colorblindMode = useAtlasStore((s) => s.colorblindMode)
   useNewsData()
@@ -78,11 +88,37 @@ export default function App() {
   useWatchlistAlerts(onGlobeView)
   useSurgeAlerts(onGlobeView)
   useAlertDispatch(onGlobeView)
+  useWorkspaceEventCapture(onGlobeView && appView === 'workstation' && Boolean(activeWorkspaceId))
+
+  useEffect(() => {
+    if (user && onGlobeView) loadWorkspaces()
+  }, [user, onGlobeView, loadWorkspaces])
+
+  // Signed-in users should not sit on the bare globe — route to dashboard unless a workspace is open.
+  useEffect(() => {
+    if (!onGlobeView || !user) return
+    const { appView: view, activeWorkspaceId: wsId } = useAtlasStore.getState()
+    if (view === 'workstation' && !wsId) {
+      useAtlasStore.getState().setAppView('dashboard')
+    }
+  }, [user, onGlobeView, appView, activeWorkspaceId])
+
+  const showDashboard = onGlobeView && user && appView === 'dashboard'
+  const showGlobeWorkstation = onGlobeView && !showDashboard
+  const inWorkspace = showGlobeWorkstation && Boolean(activeWorkspaceId)
+
+  useEffect(() => {
+    loadCountryPolygons().catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (!supabase) return undefined
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) useAtlasStore.getState().setUser(session.user)
+      if (session?.user) {
+        const store = useAtlasStore.getState()
+        store.setUser(session.user)
+        if (!store.activeWorkspaceId) store.setAppView('dashboard')
+      }
     })
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       useAtlasStore.getState().setUser(session?.user ?? null)
@@ -245,13 +281,24 @@ export default function App() {
           >
             <Onboarding sunAngle={sunAngle} />
           </motion.div>
+        ) : showDashboard ? (
+          <motion.div
+            key="workspace-dashboard"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.5 }}
+            className="fixed inset-0 z-50"
+          >
+            <WorkspaceDashboard />
+          </motion.div>
         ) : (
           <motion.div
             key="globe-view"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 1.2, delay: 0.2 }}
-            className={`fixed inset-0${tacticalMode ? ' atlas-tactical-mode' : ''}`}
+            className={`fixed inset-0${tacticalMode ? ' atlas-tactical-mode' : ''}${inWorkspace ? ' atlas-workstation-mode' : ''}`}
           >
             <GlobeLoadErrorBoundary>
               <Suspense fallback={
@@ -287,13 +334,17 @@ export default function App() {
                   <Header
                     hudHidden={hudHidden}
                     onToggleHud={() => setHudHidden((v) => !v)}
+                    inWorkspace={inWorkspace}
                   />
+                  {inWorkspace && <WorkspaceTimeline />}
+                  <PlaceIndicatorStrip hidden={hudHidden} />
 
                   <Inspector />
                   <Workbench />
                   <StreetViewOverlay />
                   <YouTubeEmbedOverlay />
                   <HoverLabel />
+                  <FieldLegendPill />
                   <LiveTicker />
                   <FetchStatusOverlay />
                   <ToastHost />

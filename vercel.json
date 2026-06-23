@@ -8,6 +8,14 @@
     "api/gdelt-query.js": {
       "memory": 512,
       "maxDuration": 30
+    },
+    "api/export-report.js": {
+      "memory": 1024,
+      "maxDuration": 60
+    },
+    "api/indicators.js": {
+      "memory": 256,
+      "maxDuration": 15
     }
   },
   "rewrites": [

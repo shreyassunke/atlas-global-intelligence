@@ -54,12 +54,24 @@ const IconLogIn = () => (
   </svg>
 )
 
+const IconWorkspaces = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+    <rect x="3" y="3" width="7" height="7" rx="1" />
+    <rect x="14" y="3" width="7" height="7" rx="1" />
+    <rect x="3" y="14" width="7" height="7" rx="1" />
+    <rect x="14" y="14" width="7" height="7" rx="1" />
+  </svg>
+)
+
 export default function HeaderUserMenu() {
   const user = useAtlasStore((s) => s.user)
   const mobileMode = useAtlasStore((s) => s.mobileMode)
   const signOut = useAtlasStore((s) => s.signOut)
   const openWorkbench = useAtlasStore((s) => s.openWorkbench)
   const reopenOnboarding = useAtlasStore((s) => s.reopenOnboarding)
+  const setAppView = useAtlasStore((s) => s.setAppView)
+  const exitWorkspace = useAtlasStore((s) => s.exitWorkspace)
+  const activeWorkspaceId = useAtlasStore((s) => s.activeWorkspaceId)
 
   const [open, setOpen] = useState(false)
   const containerRef = useRef(null)
@@ -103,6 +115,12 @@ export default function HeaderUserMenu() {
 
   const handleSignIn = () => {
     reopenOnboarding()
+    close()
+  }
+
+  const handleWorkspaces = () => {
+    if (activeWorkspaceId) exitWorkspace()
+    else setAppView('dashboard')
     close()
   }
 
@@ -163,6 +181,15 @@ export default function HeaderUserMenu() {
                     </p>
                   )}
                 </div>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="hud-dropdown-item"
+                  onClick={handleWorkspaces}
+                >
+                  <IconWorkspaces />
+                  <span>{activeWorkspaceId ? 'Back to workspaces' : 'Workspaces'}</span>
+                </button>
                 <button
                   type="button"
                   role="menuitem"

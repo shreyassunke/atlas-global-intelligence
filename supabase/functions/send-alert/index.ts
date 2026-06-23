@@ -7,6 +7,12 @@ const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN') ?? ''
 const TWILIO_FROM_NUMBER = Deno.env.get('TWILIO_FROM_NUMBER') ?? ''
 const FROM_EMAIL = Deno.env.get('ALERT_FROM_EMAIL') ?? 'alerts@atlas-intel.app'
 
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+}
+
 interface IncomingEvent {
   id: string
   title: string
@@ -88,8 +94,12 @@ async function sendSms(to: string, body: string) {
 }
 
 serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { status: 200, headers: corsHeaders })
+  }
+
   if (req.method !== 'POST') {
-    return new Response('Method not allowed', { status: 405 })
+    return new Response('Method not allowed', { status: 405, headers: corsHeaders })
   }
 
   const supabase = createClient(
@@ -101,11 +111,11 @@ serve(async (req) => {
   try {
     event = await req.json()
   } catch {
-    return new Response('Invalid JSON', { status: 400 })
+    return new Response('Invalid JSON', { status: 400, headers: corsHeaders })
   }
 
   if (!event.id || !event.title || !event.tier) {
-    return new Response('Missing required fields: id, title, tier', { status: 400 })
+    return new Response('Missing required fields: id, title, tier', { status: 400, headers: corsHeaders })
   }
 
   const { data: rules, error } = await supabase
@@ -115,7 +125,7 @@ serve(async (req) => {
 
   if (error) {
     console.error('Failed to fetch alert rules:', error)
-    return new Response('Internal error', { status: 500 })
+    return new Response('Internal error', { status: 500, headers: corsHeaders })
   }
 
   const matchingRules = (rules as AlertRule[]).filter((r) => matches(r, event))
@@ -144,6 +154,6 @@ serve(async (req) => {
 
   return new Response(
     JSON.stringify({ matched: matchingRules.length, sent, failed }),
-    { headers: { 'Content-Type': 'application/json' } },
+    { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
   )
 })

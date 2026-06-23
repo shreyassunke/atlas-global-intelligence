@@ -2,27 +2,37 @@
  * NewsAPI adapter - top-headlines and everything endpoints.
  * https://newsapi.org/docs
  *
- * OPTIMISED: added AbortController timeout to all fetch calls.
+ * Production uses /api/news-proxy (server-side key, no CORS).
  */
 
 import { normalizeNewsApiArticle } from '../normalizer'
+import { newsProxyUrl, useNewsProxy } from '../../../utils/newsProxyUrl.js'
 
 const SOURCES_PER_REQUEST = 20
 const FETCH_TIMEOUT_MS = 8000
 
 export function isRateLimited(res, data) {
   if (res?.status === 429) return true
+  if (res?.status === 426) return true
   if (data?.status === 'error' && ['rateLimited', 'apiKeyExhausted', 'apiKeyInvalid', 'apiKeyDisabled'].includes(data?.code)) {
     return true
   }
   return false
 }
 
-/** Fetch with AbortController timeout */
 function fetchWithTimeout(url) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
   return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer))
+}
+
+function buildUrl(apiKey, endpoint, params) {
+  if (useNewsProxy()) {
+    return newsProxyUrl('newsapi', { endpoint, ...params })
+  }
+  const sp = new URLSearchParams(params)
+  sp.set('apiKey', apiKey)
+  return `https://newsapi.org/v2/${endpoint}?${sp}`
 }
 
 export async function fetchNewsApi(apiKey, { standardSources = [], dimensions = [], pages = 1 } = {}) {
@@ -35,7 +45,11 @@ export async function fetchNewsApi(apiKey, { standardSources = [], dimensions = 
       for (let page = 1; page <= pages; page += 1) {
         fetches.push(
           fetchWithTimeout(
-            `https://newsapi.org/v2/top-headlines?sources=${chunk.join(',')}&pageSize=100&page=${page}&apiKey=${apiKey}`,
+            buildUrl(apiKey, 'top-headlines', {
+              sources: chunk.join(','),
+              pageSize: '100',
+              page: String(page),
+            }),
           ),
         )
       }
@@ -46,7 +60,12 @@ export async function fetchNewsApi(apiKey, { standardSources = [], dimensions = 
     for (let page = 1; page <= pages; page += 1) {
       fetches.push(
         fetchWithTimeout(
-          `https://newsapi.org/v2/everything?dimensions=${dimensions.join(',')}&sortBy=publishedAt&pageSize=100&page=${page}&apiKey=${apiKey}`,
+          buildUrl(apiKey, 'everything', {
+            dimensions: dimensions.join(','),
+            sortBy: 'publishedAt',
+            pageSize: '100',
+            page: String(page),
+          }),
         ),
       )
     }

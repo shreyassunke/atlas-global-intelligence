@@ -17,6 +17,7 @@
 
 import { unzipSync, strFromU8 } from 'fflate'
 import { cameoToDimension } from '../../core/eventSchema.js'
+import { gdeltDataProxyFile, gdeltDataProxyUrl } from '../../utils/gdeltProxyUrl.js'
 
 // ── CAMEO root codes we care about ──
 // 14 = Protest, 17 = Coerce, 18 = Assault, 19 = Fight, 20 = Use Unconventional Mass Violence
@@ -107,6 +108,9 @@ function parseGdeltRow(columns) {
   const actor1 = columns[COL.Actor1Name] || ''
   const actor2 = columns[COL.Actor2Name] || ''
   const location = columns[COL.ActionGeo_FullName] || ''
+  const actionGeoType = parseInt(columns[COL.ActionGeo_Type], 10)
+  // GDELT type 1 = country-level centroid — not pinpoint enough for globe pins.
+  const latApproximate = actionGeoType === 1
   // FIPS 10-4 code (GDELT's ActionGeo country standard) — joins directly to
   // Natural Earth `FIPS_10` for the in-worker country aggregates.
   const countryCode = (columns[COL.ActionGeo_CountryCode] || '').trim().toUpperCase()
@@ -144,6 +148,8 @@ function parseGdeltRow(columns) {
     sqlDate,
     locationName: location,
     countryCode,
+    latApproximate,
+    actionGeoType: Number.isFinite(actionGeoType) ? actionGeoType : null,
     layer: 'gdelt',
   }
 }
@@ -225,7 +231,7 @@ const MAX_CAMEO_ROWS = 5000
  */
 async function resolveLatestExportZipUrl() {
   try {
-    const upd = await fetch('https://data.gdeltproject.org/gdeltv2/lastupdate.txt', {
+    const upd = await fetch(gdeltDataProxyFile('gdeltv2/lastupdate.txt'), {
       signal: AbortSignal.timeout(25_000),
       redirect: 'manual',
     })
@@ -235,7 +241,7 @@ async function resolveLatestExportZipUrl() {
       if (line) {
         const parts = line.trim().split(/\s+/)
         const url = parts[parts.length - 1]
-        if (url && GDELT_EXPORT_ZIP_RE.test(url)) return url
+        if (url && GDELT_EXPORT_ZIP_RE.test(url)) return gdeltDataProxyUrl(url)
       }
     }
   } catch {
@@ -243,7 +249,7 @@ async function resolveLatestExportZipUrl() {
   }
 
   try {
-    const master = await fetch('https://data.gdeltproject.org/gdeltv2/masterfilelist.txt', {
+    const master = await fetch(gdeltDataProxyFile('gdeltv2/masterfilelist.txt'), {
       signal: AbortSignal.timeout(30_000),
       redirect: 'manual',
     })
@@ -255,7 +261,7 @@ async function resolveLatestExportZipUrl() {
       if (!line || !line.includes('.export.CSV.zip')) continue
       const parts = line.trim().split(/\s+/)
       const url = parts[parts.length - 1]
-      if (url && GDELT_EXPORT_ZIP_RE.test(url)) return url
+      if (url && GDELT_EXPORT_ZIP_RE.test(url)) return gdeltDataProxyUrl(url)
     }
   } catch {
     /* give up */

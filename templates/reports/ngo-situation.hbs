@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>{{title}} — NGO Situation Report</title>
+  <style>{{> printStyles}}</style>
+</head>
+<body class="atlas-report atlas-report--ngo">
+  <header class="report-header">
+    <h1>{{title}}</h1>
+    <p class="report-meta">Humanitarian Situation Report · {{generatedAt}} · {{provenance.place}}</p>
+  </header>
+
+  {{#each sections}}
+  <section class="report-section report-section--{{kind}}">
+    <h2>{{title}}</h2>
+    {{#if body}}<div class="report-body">{{{bodyHtml}}}</div>{{/if}}
+    {{#if rows}}
+    {{#if (eq kind "evidence")}}
+    <table class="report-table">
+      <thead><tr><th>Hazard / Signal</th><th>Priority</th><th>Dimension</th><th>Confidence</th></tr></thead>
+      <tbody>
+        {{#each rows}}
+        <tr{{#if lowConfidence}} class="low-confidence"{{/if}}>
+          <td>{{title}}</td><td>{{priority}}</td><td>{{dimension}}</td><td>{{confidence}}</td>
+        </tr>
+        {{/each}}
+      </tbody>
+    </table>
+    {{/if}}
+    {{#if (eq kind "sources")}}
+    <ul class="report-sources">{{#each rows}}<li>{{name}} — {{count}} references</li>{{/each}}</ul>
+    {{/if}}
+    {{/if}}
+  </section>
+  {{/each}}
+
+  <footer class="report-footer">ATLAS · Sources &amp; confidence appendix · {{provenance.sourceCount}} sources</footer>
+</body>
+</html>

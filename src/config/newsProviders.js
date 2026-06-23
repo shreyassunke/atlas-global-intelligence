@@ -8,18 +8,23 @@ function parseKeys(envValue) {
   return envValue.split(',').map((k) => k.trim()).filter(Boolean)
 }
 
+/** In production, server proxy can supply keys — use sentinel so fetcher still runs. */
+function keysOrProxy(singleEnv, multiEnv) {
+  const multi = parseKeys(import.meta.env[multiEnv])
+  if (multi.length > 0) return multi
+  const single = import.meta.env[singleEnv]
+  if (single) return [single]
+  if (import.meta.env.PROD || import.meta.env.VITE_NEWS_PROXY === 'true') return ['proxy']
+  return []
+}
+
 export const NEWS_PROVIDERS = [
   {
     id: 'newsapi',
     name: 'NewsAPI',
     envKey: 'VITE_NEWS_API_KEY',
     envKeysMulti: 'VITE_NEWS_API_KEYS',
-    getKeys: () => {
-      const multi = parseKeys(import.meta.env.VITE_NEWS_API_KEYS)
-      if (multi.length > 0) return multi
-      const single = import.meta.env.VITE_NEWS_API_KEY
-      return single ? [single] : []
-    },
+    getKeys: () => keysOrProxy('VITE_NEWS_API_KEY', 'VITE_NEWS_API_KEYS'),
     baseUrl: 'https://newsapi.org/v2',
     dailyLimit: 100,
     supportsSources: true,
@@ -30,12 +35,7 @@ export const NEWS_PROVIDERS = [
     name: 'GNews',
     envKey: 'VITE_GNEWS_KEY',
     envKeysMulti: 'VITE_GNEWS_KEYS',
-    getKeys: () => {
-      const multi = parseKeys(import.meta.env.VITE_GNEWS_KEYS)
-      if (multi.length > 0) return multi
-      const single = import.meta.env.VITE_GNEWS_KEY
-      return single ? [single] : []
-    },
+    getKeys: () => keysOrProxy('VITE_GNEWS_KEY', 'VITE_GNEWS_KEYS'),
     baseUrl: 'https://gnews.io/api/v4',
     dailyLimit: 100,
     supportsSources: false,
@@ -47,12 +47,7 @@ export const NEWS_PROVIDERS = [
     name: 'TheNewsAPI',
     envKey: 'VITE_THENEWS_API_KEY',
     envKeysMulti: 'VITE_THENEWS_API_KEYS',
-    getKeys: () => {
-      const multi = parseKeys(import.meta.env.VITE_THENEWS_API_KEYS)
-      if (multi.length > 0) return multi
-      const single = import.meta.env.VITE_THENEWS_API_KEY
-      return single ? [single] : []
-    },
+    getKeys: () => keysOrProxy('VITE_THENEWS_API_KEY', 'VITE_THENEWS_API_KEYS'),
     baseUrl: 'https://api.thenewsapi.com/v1',
     dailyLimit: 50,
     supportsSources: false,

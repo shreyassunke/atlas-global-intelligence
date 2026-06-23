@@ -31,11 +31,13 @@ import { getTimezoneViewCenter } from '../../utils/geo'
 import {
     useGlobeViewModels,
     applyMarkerClick,
-    applyBackgroundClick,
     applyMarkerHover,
     applyCountryClick,
+    applyGlobeMapClick,
     resolveFlyToTarget,
     markerRingMaxRadius,
+    isSpriteArchetype,
+    isTrackArchetype,
 } from '../../globe-core'
 import { activeGibsImageryKey, gibsTileEngineUrlForKey } from '../../config/gibsBasemap'
 import { buildTerminatorRing } from '../../core/solarTerminator'
@@ -467,6 +469,52 @@ export default function GlobeGLView({ onGlobeReady }) {
                 }
             })
 
+        // Event markers — hazard sprites (html layer); tracks stay on points layer.
+        globe
+            .htmlElementsData([])
+            .htmlLat('lat')
+            .htmlLng('lng')
+            .htmlAltitude(() => POINT_ALTITUDE)
+            .htmlElement((d) => {
+                const el = document.createElement('div')
+                const size = d.sizePx || 20
+                const opacity = d.opacity ?? 1
+                el.dataset.baseOpacity = String(opacity)
+                el.style.width = `${size}px`
+                el.style.height = `${size}px`
+                el.style.pointerEvents = 'auto'
+                el.style.cursor = 'pointer'
+                el.style.transition = 'opacity 200ms'
+                const img = document.createElement('img')
+                img.src = d.markerIconUrl || ''
+                img.width = size
+                img.height = size
+                img.draggable = false
+                img.style.display = 'block'
+                img.style.opacity = String(opacity)
+                el.appendChild(img)
+                el.onclick = (ev) => {
+                    ev.stopPropagation()
+                    applyMarkerClick(d.raw || d)
+                    const currentAlt = globe.pointOfView().altitude ?? 2.5
+                    const targetAlt = Math.max(0.15, Math.min(0.8, currentAlt * 0.4))
+                    globe.pointOfView({ lat: d.lat, lng: d.lng, altitude: targetAlt }, 1400)
+                }
+                el.onmouseenter = () => {
+                    const { _lastPointerX: sx, _lastPointerY: sy } = container
+                    applyMarkerHover(d.raw || d, sx, sy)
+                    container.style.cursor = 'pointer'
+                }
+                el.onmouseleave = () => {
+                    applyMarkerHover(null)
+                    container.style.cursor = 'grab'
+                }
+                return el
+            })
+            .htmlElementVisibilityModifier((el, isVisible) => {
+                el.style.opacity = isVisible ? (el.dataset.baseOpacity || '1') : '0'
+            })
+
         // Track mouse position on the container for hover tooltip coords
         const onPointerMove = (e) => {
             container._lastPointerX = e.clientX
@@ -474,9 +522,9 @@ export default function GlobeGLView({ onGlobeReady }) {
         }
         container.addEventListener('pointermove', onPointerMove)
 
-        // ── Globe background click — dismiss both news card and event panel ──
-        globe.onGlobeClick(() => {
-            applyBackgroundClick()
+        // ── Globe background click — country pick or dismiss selection ──
+        globe.onGlobeClick(({ lat, lng }) => {
+            applyGlobeMapClick({ lat, lng })
         })
 
         // ── Rings layer ──
@@ -665,7 +713,10 @@ export default function GlobeGLView({ onGlobeReady }) {
     useEffect(() => {
         const globe = globeRef.current
         if (!globe) return
-        globe.pointsData(allMarkers)
+        const eventMarkers = allMarkers.filter((m) => isSpriteArchetype(m))
+        const trackMarkers = allMarkers.filter((m) => isTrackArchetype(m))
+        globe.pointsData(trackMarkers)
+        globe.htmlElementsData(eventMarkers)
         const ringItems = [...allMarkers]
             .sort((a, b) => (b.severity || 0) - (a.severity || 0))
             .slice(0, isMobile ? 15 : 80)

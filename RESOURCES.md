@@ -67,4 +67,5 @@
 - [MapLibre GL JS](https://maplibre.org) — Open source WebGL maps/globe
 
 ## Atlas repository docs
+- [Source geolocation reference](docs/SOURCE_GEOLOCATION_REFERENCE.md) — which feeds have pinpoint vs approximate geo; globe plotting checklist
 - [Greedy graph coloring presentation (FlatMap US demo)](docs/greedy-coloring-presentation.md) — speaker notes, four-color context, embedded source excerpts

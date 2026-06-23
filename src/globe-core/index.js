@@ -14,6 +14,8 @@ export {
   rgbaFromHex,
   RING_MAX_RADIUS,
   TRACK_COLORS,
+  isSpriteArchetype,
+  isTrackArchetype,
 } from './viewModels'
 export { buildClusterViewModels, convexHull, MAX_CLUSTER_INPUTS } from './clusters'
 export { buildChoroplethViewModels, geoJsonToOuterRings, CHOROPLETH_STROKE } from './choropleth'
@@ -21,8 +23,10 @@ export { buildHeatBins } from './heatBins'
 export {
   applyBackgroundClick,
   applyCountryClick,
+  applyGlobeMapClick,
   applyMarkerClick,
   applyMarkerHover,
+  findChoroplethCountryAtPoint,
   markerClickIntent,
   resolveFlyToTarget,
 } from './interactions'

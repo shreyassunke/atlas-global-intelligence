@@ -249,15 +249,20 @@ export default function Onboarding({ sunAngle = 0 }) {
       >
         <GlassFilter />
         <div className="onboarding-lightroom" aria-hidden />
-        <main className="onboarding-page onboarding-page--auth relative z-10 w-full max-w-md flex flex-col justify-center items-center flex-1 px-6 sm:px-10 py-12">
-          <div className="w-full flex flex-col items-center gap-10 shrink-0 mt-8 mb-auto">
-            <header className="text-center w-full flex flex-col items-center">
+        <main className="onboarding-page onboarding-page--auth relative z-10 w-full max-w-[440px] flex flex-col justify-center items-center flex-1 px-5 sm:px-6 py-10">
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+            className="auth-panel w-full shrink-0"
+          >
+            <header className="text-center w-full flex flex-col items-center mb-8">
               <motion.button
                 type="button"
                 initial={{ opacity: 0, y: -6 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.6, ease: 'easeOut' }}
-                className="atlas-logo atlas-logo--modern border-0 bg-transparent p-0 cursor-pointer text-inherit mb-6"
+                className="atlas-logo atlas-logo--modern border-0 bg-transparent p-0 cursor-pointer text-inherit mb-4"
                 onMouseEnter={decodeAll}
                 onTouchStart={decodeAll}
                 onClick={reopenLanding}
@@ -286,15 +291,14 @@ export default function Onboarding({ sunAngle = 0 }) {
               <motion.p
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                transition={{ delay: 0.3, duration: 0.5 }}
-                className="mt-6 text-[10px] sm:text-[11px] tracking-[0.5em] text-white/30 uppercase"
+                transition={{ delay: 0.2, duration: 0.5 }}
+                className="auth-panel-tagline text-[10px] sm:text-[11px] uppercase"
               >
                 Global Intelligence Platform
               </motion.p>
-              <div className="onboarding-header-rule" aria-hidden />
             </header>
             <AuthStep />
-          </div>
+          </motion.div>
         </main>
       </div>
     )

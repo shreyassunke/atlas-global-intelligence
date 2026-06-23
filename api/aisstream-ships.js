@@ -3,29 +3,20 @@
  * Server-side AISStream.io WebSocket collector with L3 in-memory cache.
  *
  * Env: AISSTREAM_API_KEY (server-only)
+ * Query: ?regions=hormuz,suez (optional filter by chokepoint name slug)
  */
+
+import { AIS_CHOKEPOINT_BBOXES, CHOKEPOINTS } from '../src/core/chokepoints.js'
 
 export const config = {
   maxDuration: 30,
 }
 
-/** AISStream expects [[minLng, minLat], [maxLng, maxLat]] — NOT lat/lng order. */
-const CHOKEPOINT_BBOXES = [
-  [[54.8, 25.1], [57.8, 28.1]],
-  [[30.8, 28.5], [33.8, 31.5]],
-  [[100.3, 1.0], [103.3, 4.0]],
-  [[41.8, 11.1], [44.8, 14.1]],
-  [[-81.1, 7.5], [-78.1, 10.5]],
-  [[119.0, 23.0], [122.0, 26.0]],
-  [[27.5, 39.6], [30.5, 42.6]],
-  [[113.5, 13.5], [116.5, 16.5]],
-]
-
 const COLLECT_MS = 6_000
 const WS_OPEN_TIMEOUT_MS = 8_000
 const CACHE_MS = 30_000
 
-/** @type {{ vessels: object[], ts: number } | null} */
+/** @type {{ vessels: object[], ts: number, bboxCount: number } | null} */
 let cache = null
 
 async function readWsPayload(data) {
@@ -35,7 +26,11 @@ async function readWsPayload(data) {
   return String(data)
 }
 
-function collectAisVessels(apiKey) {
+/**
+ * @param {string} apiKey
+ * @param {[number, number][][]} boundingBoxes
+ */
+function collectAisVessels(apiKey, boundingBoxes) {
   return new Promise((resolve, reject) => {
     const vessels = new Map()
     let settled = false
@@ -71,7 +66,7 @@ function collectAisVessels(apiKey) {
       clearTimeout(openTimer)
       ws.send(JSON.stringify({
         APIKey: apiKey,
-        BoundingBoxes: CHOKEPOINT_BBOXES,
+        BoundingBoxes: boundingBoxes,
         FilterMessageTypes: ['PositionReport'],
       }))
     })
@@ -129,6 +124,29 @@ function jsonResponse(body, { stale = false, status = 200 } = {}) {
   })
 }
 
+/**
+ * @param {URL} url
+ * @returns {[number, number][][]}
+ */
+function resolveBoundingBoxes(url) {
+  const regionParam = url.searchParams.get('regions')?.trim()
+  if (!regionParam) return AIS_CHOKEPOINT_BBOXES
+
+  const slugs = regionParam.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+  const matched = CHOKEPOINTS.filter((cp) =>
+    slugs.some((slug) => cp.name.toLowerCase().replace(/\s+/g, '-') === slug
+      || cp.name.toLowerCase().includes(slug)
+      || cp.region === slug),
+  )
+  if (!matched.length) return AIS_CHOKEPOINT_BBOXES
+
+  const d = 1.5
+  return matched.map((cp) => [
+    [cp.lng - d, cp.lat - d],
+    [cp.lng + d, cp.lat + d],
+  ])
+}
+
 export default async function handler(req) {
   if (req.method === 'OPTIONS') {
     return new Response(null, {
@@ -156,20 +174,34 @@ export default async function handler(req) {
     }, { status: 200 })
   }
 
-  if (cache && Date.now() - cache.ts < CACHE_MS) {
-    return jsonResponse({ vessels: cache.vessels, count: cache.vessels.length, cached: true }, { stale: true })
+  const url = new URL(req.url)
+  const boundingBoxes = resolveBoundingBoxes(url)
+
+  if (cache && Date.now() - cache.ts < CACHE_MS && cache.bboxCount === boundingBoxes.length) {
+    return jsonResponse({
+      vessels: cache.vessels,
+      count: cache.vessels.length,
+      cached: true,
+      bboxCount: boundingBoxes.length,
+    }, { stale: true })
   }
 
   try {
-    const vessels = await collectAisVessels(apiKey)
-    cache = { vessels, ts: Date.now() }
-    return jsonResponse({ vessels, count: vessels.length })
+    const vessels = await collectAisVessels(apiKey, boundingBoxes)
+    cache = { vessels, ts: Date.now(), bboxCount: boundingBoxes.length }
+    return jsonResponse({
+      vessels,
+      count: vessels.length,
+      bboxCount: boundingBoxes.length,
+      chokepointCount: CHOKEPOINTS.length,
+    })
   } catch (err) {
     if (cache?.vessels?.length) {
       return jsonResponse({
         vessels: cache.vessels,
         count: cache.vessels.length,
         warning: err.message || 'AISStream temporarily unavailable — showing cached vessels',
+        bboxCount: boundingBoxes.length,
       }, { stale: true })
     }
     return jsonResponse({

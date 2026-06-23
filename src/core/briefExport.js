@@ -1,6 +1,6 @@
 import { DIMENSION_LABELS, PRIORITY_LABELS, formatToneScore } from './eventSchema'
 import { buildShareUrl } from './urlState'
-import { eventSourceToGlobeDataLayerKey } from './globeLayers'
+import { eventSourceToGlobeDataLayerKey, hasPreciseGeolocation } from './globeLayers'
 
 const TIME_FILTER_MAX_AGE_MS = {
   live: 2 * 3600_000,
@@ -35,8 +35,8 @@ export function getVisibleGlobeEvents(state, limit = 40) {
 
   for (const evt of events) {
     if (evt.trackKind) continue
-    if (evt.lat == null || evt.lng == null) continue
-    const layerKey = eventSourceToGlobeDataLayerKey(evt.source)
+    if (!hasPreciseGeolocation(evt)) continue
+    const layerKey = eventSourceToGlobeDataLayerKey(evt)
     if (!layerKey || dataLayers?.[layerKey] === false) continue
     if (!dims.has(evt.dimension)) continue
     if (!passesPriorityFilter(evt, priorityFilter)) continue

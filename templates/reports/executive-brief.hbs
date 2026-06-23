@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>{{title}} — Executive Brief</title>
+  <style>{{> printStyles}}</style>
+</head>
+<body class="atlas-report atlas-report--executive">
+  <header class="report-header report-header--executive">
+    <div class="report-classification">{{classificationLabel}}</div>
+    <h1>{{title}}</h1>
+    <p class="report-meta">Executive Brief · {{generatedAt}}</p>
+  </header>
+
+  {{#each sections}}
+  <section class="report-section report-section--{{kind}}">
+    <h2>{{title}}</h2>
+    {{#if body}}<div class="report-body">{{{bodyHtml}}}</div>{{/if}}
+    {{#if rows}}
+    {{#if (eq kind "evidence")}}
+    <table class="report-table">
+      <thead><tr><th>Affected Signal</th><th>Priority</th><th>Dimension</th><th>Source</th></tr></thead>
+      <tbody>
+        {{#each rows}}
+        <tr{{#if lowConfidence}} class="low-confidence"{{/if}}>
+          <td>{{title}}</td><td>{{priority}}</td><td>{{dimension}}</td><td>{{source}}</td>
+        </tr>
+        {{/each}}
+      </tbody>
+    </table>
+    {{/if}}
+    {{#if (eq kind "macro")}}
+    <table class="report-table report-table--macro">
+      <thead><tr><th>Indicator</th><th>Value</th><th>Cadence</th></tr></thead>
+      <tbody>
+        {{#each rows}}<tr><td>{{label}}</td><td>{{value}}{{#if unit}} {{unit}}{{/if}}</td><td>{{cadence}}</td></tr>{{/each}}
+      </tbody>
+    </table>
+    {{/if}}
+    {{#if (eq kind "sources")}}
+    <ul class="report-sources">{{#each rows}}<li>{{name}} ({{count}})</li>{{/each}}</ul>
+    {{/if}}
+    {{/if}}
+  </section>
+  {{/each}}
+
+  <footer class="report-footer">ATLAS Executive Brief · {{generatedAt}} · {{provenance.evidenceCount}} evidence items</footer>
+</body>
+</html>

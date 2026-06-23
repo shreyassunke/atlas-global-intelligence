@@ -1,3 +1,9 @@
+import {
+  warmMarkerIconCache,
+  enrichEventsMarkerVisuals,
+  enrichBatchDiffMarkerVisuals,
+} from './markerIconCache.js'
+
 let eventBusWorker = null
 let fetchWorker = null
 let subscribers = new Set()
@@ -25,6 +31,8 @@ function logBreadcrumb(event) {
     {
       title: event.title,
       dimension: event.dimension,
+      environmentHazard: event.environmentHazard,
+      markerIconUrl: event.markerIconUrl ? 'cached' : null,
       priority: event.priority,
       lat: event.lat,
       lng: event.lng,
@@ -34,7 +42,12 @@ function logBreadcrumb(event) {
 }
 
 export function initEventBus() {
-  if (eventBusWorker) return
+  warmMarkerIconCache()
+
+  if (eventBusWorker) {
+    // Workers already running (e.g. Vite HMR) — handlers below are only wired once.
+    return
+  }
 
   eventBusWorker = new Worker(
     new URL('../workers/eventBus.worker.js', import.meta.url),
@@ -57,10 +70,12 @@ export function initEventBus() {
   eventBusWorker.onmessage = (msg) => {
     const { type } = msg.data
     if (type === 'BATCH_UPDATE') {
-      for (const fn of subscribers) fn(msg.data.diff)
+      const diff = enrichBatchDiffMarkerVisuals(msg.data.diff)
+      for (const fn of subscribers) fn(diff)
     }
     if (type === 'SNAPSHOT') {
-      for (const fn of subscribers) fn({ snapshot: msg.data.events })
+      const snapshot = enrichEventsMarkerVisuals(msg.data.events)
+      for (const fn of subscribers) fn({ snapshot })
     }
     if (type === 'PRIORITY_COUNTS') {
       for (const fn of subscribers) fn({ priorityCounts: msg.data.counts })
@@ -71,7 +86,7 @@ export function initEventBus() {
     const { type } = msg.data
 
     if (type === 'EVENTS') {
-      const events = msg.data.events || []
+      const events = enrichEventsMarkerVisuals(msg.data.events || [])
       if (DEV_BREADCRUMBS && events.length) {
         for (const evt of events) logBreadcrumb(evt)
       }

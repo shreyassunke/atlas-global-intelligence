@@ -22,6 +22,7 @@ const SOURCE_MODULES = {
   'gdelt-vgkg': 'news',
   firms: 'environment',
   ucdp: 'conflict',
+  acled: 'conflict',
   coingecko: 'financial',
   'alt-fng': 'prediction',
   'cisa-kev': 'cyber',

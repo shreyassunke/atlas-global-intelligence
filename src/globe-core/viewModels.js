@@ -1,27 +1,25 @@
 /**
  * globe-core/viewModels — renderer-agnostic marker view-models.
  *
- * One styling pass for all three renderers (Google Map3D, Globe.GL,
- * MapLibre FlatMap). Each marker VM carries every visual attribute a
- * renderer needs; adapters translate VM fields into their native layer
- * primitives and never re-derive colors/sizes from raw events.
- *
- * VM shape:
- *   {
- *     id, kind: 'event'|'aircraft'|'vessel'|'satellite'|'storm',
- *     lat, lng,
- *     color,      // hex — dimension color for events, track color for tracks
- *     radiusGl,   // globe.gl point radius (angular degrees)
- *     sizePx,     // sprite/icon pixel size (Map3D markers)
- *     opacity,    // corroboration-derived confidence opacity
- *     severity, priority, dimension, title,
- *     recency,    // 'pulsing' | 'glowing' | 'static' (events only)
- *     raw,        // the underlying store event (click/hover payload)
- *   }
+ * Archetype grammar (pin / track / field / reference / derived) is orthogonal
+ * to dimension color and hazard shape. Renderers consume VMs only.
  */
 import { DIMENSION_COLORS } from '../core/eventSchema'
-import { getAnimationState, getSeveritySize } from '../core/visualGrammar'
+import {
+  getAnimationState,
+  getSeveritySize,
+} from '../core/visualGrammar'
+import { enrichEventMarkerVisuals } from '../core/markerIconCache'
 import { eventSourceToGlobeDataLayerKey } from '../core/globeLayers'
+import {
+  MARKER_ARCHETYPES,
+  getArchetypeBehavior,
+  resolveAnimationClass,
+  resolveArchetypeOpacity,
+  trackSubtypeFromEntity,
+  trackSizePx,
+  truthLabel,
+} from '../core/markerArchetype'
 
 const REVEAL_MS = 450
 
@@ -64,115 +62,98 @@ export function eventMarkerColor(evt) {
   return DIMENSION_COLORS[evt.dimension] || '#1a90ff'
 }
 
-/** Globe.GL point radius from severity. */
 export function eventMarkerRadiusGl(evt) {
   return evt.severity >= 4 ? 0.55 : evt.severity >= 3 ? 0.42 : 0.3
 }
 
-/** Pulse-ring max radius — larger rings for higher-severity events. */
 export function markerRingMaxRadius(vm, detectionMode = false) {
   if (detectionMode) return 2.8
+  if (vm.archetype === MARKER_ARCHETYPES.REFERENCE) return 0
+  if (vm.archetype === MARKER_ARCHETYPES.DERIVED) return 2.2
   if (vm.severity >= 4) return 5
   if (vm.severity >= 3) return 4
   return RING_MAX_RADIUS
 }
 
-function eventVM(evt) {
-  return {
-    id: evt.id,
+/** @deprecated use vm.archetype — kept for renderer migration */
+export function vmRenderChannel(vm) {
+  if (vm.archetype === MARKER_ARCHETYPES.TRACK) return 'track'
+  if (vm.archetype === MARKER_ARCHETYPES.REFERENCE || vm.archetype === MARKER_ARCHETYPES.DERIVED) {
+    return 'sprite'
+  }
+  if (vm.archetype === MARKER_ARCHETYPES.PIN) return 'sprite'
+  return 'track'
+}
+
+function pinVM(evt) {
+  const enriched = enrichEventMarkerVisuals(evt)
+  const behavior = getArchetypeBehavior(MARKER_ARCHETYPES.PIN)
+  const recency = getAnimationState(enriched.timestamp)
+  const vm = {
+    id: enriched.id,
+    archetype: MARKER_ARCHETYPES.PIN,
     kind: 'event',
-    lat: evt.lat,
-    lng: evt.lng,
-    color: eventMarkerColor(evt),
-    radiusGl: eventMarkerRadiusGl(evt),
-    sizePx: getSeveritySize(evt.severity),
-    opacity: evt.opacity ?? 1,
-    severity: evt.severity,
-    priority: evt.priority,
-    dimension: evt.dimension,
-    title: evt.title,
-    recency: getAnimationState(evt.timestamp),
-    raw: evt,
+    lat: enriched.lat,
+    lng: enriched.lng,
+    color: eventMarkerColor(enriched),
+    radiusGl: eventMarkerRadiusGl(enriched),
+    sizePx: getSeveritySize(enriched.severity),
+    opacity: resolveArchetypeOpacity(MARKER_ARCHETYPES.PIN, enriched, behavior),
+    severity: enriched.severity,
+    priority: enriched.priority,
+    dimension: enriched.dimension,
+    environmentHazard: enriched.environmentHazard || null,
+    markerIconUrl: enriched.markerIconUrl || '',
+    title: enriched.title,
+    recency,
+    animationClass: resolveAnimationClass(MARKER_ARCHETYPES.PIN, { recency }),
+    inspectorMode: behavior.inspectorMode,
+    truth: truthLabel(MARKER_ARCHETYPES.PIN, enriched),
+    raw: enriched,
   }
+  return vm
 }
 
-function aircraftVM(evt) {
+function trackVM(evt, trackSubtype) {
   const mil = Boolean(evt.isMilitary)
+  const behavior = getArchetypeBehavior(MARKER_ARCHETYPES.TRACK)
+  let color = TRACK_COLORS[trackSubtype] || TRACK_COLORS.aircraft
+  if (trackSubtype === 'aircraft' && mil) color = TRACK_COLORS.aircraftMilitary
+  if (trackSubtype === 'satellite' && mil) color = TRACK_COLORS.satelliteMilitary
+
+  const radiusGl = trackSubtype === 'storm' ? 0.55
+    : trackSubtype === 'aircraft' ? (mil ? 0.45 : 0.38)
+      : trackSubtype === 'vessel' ? 0.4 : 0.32
+
+  const enriched = trackSubtype === 'storm' ? enrichEventMarkerVisuals(evt) : evt
+
   return {
     id: evt.id,
-    kind: 'aircraft',
+    archetype: MARKER_ARCHETYPES.TRACK,
+    trackSubtype,
+    kind: trackSubtype,
     lat: evt.lat,
     lng: evt.lng,
-    color: mil ? TRACK_COLORS.aircraftMilitary : TRACK_COLORS.aircraft,
-    radiusGl: mil ? 0.45 : 0.38,
-    sizePx: mil ? 26 : 22,
+    color,
+    radiusGl,
+    sizePx: trackSizePx(trackSubtype),
     opacity: 1,
     severity: evt.severity,
     priority: evt.priority,
     dimension: evt.dimension,
+    environmentHazard: enriched.environmentHazard || null,
+    markerIconUrl: enriched.markerIconUrl || '',
     title: evt.title,
-    raw: evt,
-  }
-}
-
-function vesselVM(evt) {
-  return {
-    id: evt.id,
-    kind: 'vessel',
-    lat: evt.lat,
-    lng: evt.lng,
-    color: TRACK_COLORS.vessel,
-    radiusGl: 0.4,
-    sizePx: 24,
-    opacity: 1,
-    severity: evt.severity,
-    priority: evt.priority,
-    dimension: evt.dimension,
-    title: evt.title,
-    raw: evt,
-  }
-}
-
-function satelliteVM(evt) {
-  const mil = Boolean(evt.isMilitary)
-  return {
-    id: evt.id,
-    kind: 'satellite',
-    lat: evt.lat,
-    lng: evt.lng,
-    color: mil ? TRACK_COLORS.satelliteMilitary : TRACK_COLORS.satellite,
-    radiusGl: 0.32,
-    sizePx: 18,
-    opacity: 1,
-    severity: evt.severity,
-    priority: evt.priority,
-    dimension: evt.dimension,
-    title: evt.title,
-    raw: evt,
-  }
-}
-
-function stormVM(evt) {
-  return {
-    id: evt.id,
-    kind: 'storm',
-    lat: evt.lat,
-    lng: evt.lng,
-    color: TRACK_COLORS.storm,
-    radiusGl: 0.55,
-    sizePx: 28,
-    opacity: 1,
-    severity: evt.severity,
-    priority: evt.priority || 'p1',
-    dimension: evt.dimension || 'environment',
-    title: evt.title,
-    raw: evt,
+    recency: 'static',
+    animationClass: null,
+    inspectorMode: behavior.inspectorMode,
+    truth: truthLabel(MARKER_ARCHETYPES.TRACK, evt),
+    raw: enriched,
   }
 }
 
 /**
- * Build per-kind marker view-model lists from the filtered layer events
- * (the output of `useGlobeLayerEvents`).
+ * Build per-kind marker view-model lists from filtered layer events.
  */
 export function buildMarkerViewModels({
   globePlottedEvents = [],
@@ -180,33 +161,47 @@ export function buildMarkerViewModels({
   tacticalVessels = [],
   tacticalSatellites = [],
   stormOverlays = [],
+  referenceMarkers = [],
+  derivedMarkers = [],
   layerRevealAt = {},
 } = {}) {
   const eventMarkers = globePlottedEvents.map((evt) => {
-    const vm = eventVM(evt)
-    const layerKey = eventSourceToGlobeDataLayerKey(evt.source)
+    const vm = pinVM(evt)
+    const layerKey = eventSourceToGlobeDataLayerKey(evt)
     return withRevealOpacity(vm, layerKey, layerRevealAt, evt.cacheStale)
   })
   const aircraftMarkers = tacticalAircraft.map((evt) =>
-    withRevealOpacity(aircraftVM(evt), 'adsb', layerRevealAt, evt.cacheStale),
+    withRevealOpacity(trackVM(evt, 'aircraft'), 'adsb', layerRevealAt, evt.cacheStale),
   )
   const vesselMarkers = tacticalVessels.map((evt) =>
-    withRevealOpacity(vesselVM(evt), 'ais', layerRevealAt, evt.cacheStale),
+    withRevealOpacity(trackVM(evt, 'vessel'), 'ais', layerRevealAt, evt.cacheStale),
   )
   const satelliteMarkers = tacticalSatellites.map((evt) =>
-    withRevealOpacity(satelliteVM(evt), 'satellites', layerRevealAt, evt.cacheStale),
+    withRevealOpacity(trackVM(evt, 'satellite'), 'satellites', layerRevealAt, evt.cacheStale),
   )
   const stormMarkers = stormOverlays
     .filter((s) => s.lat != null && s.lng != null)
-    .map((evt) => withRevealOpacity(stormVM(evt), 'nhcStorms', layerRevealAt, evt.cacheStale))
+    .map((evt) => withRevealOpacity(trackVM(evt, 'storm'), 'nhcStorms', layerRevealAt, evt.cacheStale))
+
+  const refMarkers = referenceMarkers.map((vm) =>
+    withRevealOpacity(vm, vm.refKind === 'chokepoint' ? 'referenceChokepoints' : 'referenceNuclear', layerRevealAt),
+  )
+  const derMarkers = derivedMarkers.map((vm) =>
+    withRevealOpacity(vm, 'derivedSignals', layerRevealAt),
+  )
+
   return {
     eventMarkers,
     aircraftMarkers,
     vesselMarkers,
     satelliteMarkers,
     stormMarkers,
+    referenceMarkers: refMarkers,
+    derivedMarkers: derMarkers,
     allMarkers: [
+      ...refMarkers,
       ...eventMarkers,
+      ...derMarkers,
       ...aircraftMarkers,
       ...vesselMarkers,
       ...satelliteMarkers,
@@ -214,3 +209,18 @@ export function buildMarkerViewModels({
     ],
   }
 }
+
+/** Classify legacy VM kind for filters during migration. */
+export function isSpriteArchetype(vm) {
+  return vm.archetype === MARKER_ARCHETYPES.PIN
+    || vm.archetype === MARKER_ARCHETYPES.REFERENCE
+    || vm.archetype === MARKER_ARCHETYPES.DERIVED
+    || vm.kind === 'event'
+}
+
+export function isTrackArchetype(vm) {
+  return vm.archetype === MARKER_ARCHETYPES.TRACK
+    || (vm.kind && vm.kind !== 'event' && !vm.archetype)
+}
+
+export { trackSubtypeFromEntity }

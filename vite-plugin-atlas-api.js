@@ -1,6 +1,6 @@
 /**
  * Vite dev middleware — serves /api/* handlers without requiring `vercel dev`.
- * Loads .env.local so server-only keys (AISSTREAM_API_KEY) work in `npm run dev`.
+ * Loads `.env` / `.env.local` so server-only keys work in `npm run dev`.
  */
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -53,11 +53,21 @@ const DEV_API_ROUTES = [
   { method: 'GET', match: /^\/api\/aisstream-ships\/?$/, module: path.join(pluginRoot, 'api/aisstream-ships.js') },
   { method: 'GET', match: /^\/api\/nhc-storms\/?$/, module: path.join(pluginRoot, 'api/nhc-storms.js') },
   { method: 'GET', match: /^\/api\/gdacs-rss\/?$/, module: path.join(pluginRoot, 'api/gdacs-rss.js') },
+  { methods: ['GET', 'OPTIONS'], match: /^\/api\/feed-proxy\/?$/, module: path.join(pluginRoot, 'api/feed-proxy.js') },
+  { methods: ['GET', 'OPTIONS'], match: /^\/api\/gdelt-api\/?$/, module: path.join(pluginRoot, 'api/gdelt-api.js') },
+  { methods: ['GET', 'OPTIONS'], match: /^\/api\/gdelt-data\/?$/, module: path.join(pluginRoot, 'api/gdelt-data.js') },
+  { methods: ['GET', 'OPTIONS'], match: /^\/api\/news-proxy\/?$/, module: path.join(pluginRoot, 'api/news-proxy.js') },
   { methods: ['GET', 'POST', 'OPTIONS'], match: /^\/api\/feed-snapshots\/?$/, module: path.join(pluginRoot, 'api/feed-snapshots.js') },
   { method: 'POST', match: /^\/api\/overpass-landmarks\/?$/, module: path.join(pluginRoot, 'api/overpass-landmarks.js') },
   // BigQuery proxy (Historical / Imagery / Network tabs). Served here so the
   // main `npm run dev` server fully covers /api and `vercel dev` is optional.
   { methods: ['GET', 'POST', 'OPTIONS'], match: /^\/api\/gdelt-query\/?$/, module: path.join(pluginRoot, 'api/gdelt-query.js'), style: 'node' },
+  { methods: ['GET', 'OPTIONS'], match: /^\/api\/indicators\/?$/, module: path.join(pluginRoot, 'api/indicators.js') },
+  { methods: ['GET', 'OPTIONS'], match: /^\/api\/bluesky-posts\/?$/, module: path.join(pluginRoot, 'api/bluesky-posts.js') },
+  { methods: ['GET', 'OPTIONS'], match: /^\/api\/fact-check-claims\/?$/, module: path.join(pluginRoot, 'api/fact-check-claims.js') },
+  { methods: ['GET', 'POST', 'OPTIONS'], match: /^\/api\/entities\/?$/, module: path.join(pluginRoot, 'api/entities.js') },
+  { methods: ['POST', 'OPTIONS'], match: /^\/api\/export-report\/?$/, module: path.join(pluginRoot, 'api/export-report.js'), style: 'node' },
+  { methods: ['GET', 'OPTIONS'], match: /^\/api\/export-report-status\/?$/, module: path.join(pluginRoot, 'api/export-report-status.js'), style: 'node' },
 ]
 
 /** @type {Map<string, { default: Function }>} */

@@ -10,6 +10,7 @@ create table if not exists public.feed_snapshots (
 
 alter table public.feed_snapshots enable row level security;
 
+drop policy if exists "Public read feed snapshots" on public.feed_snapshots;
 create policy "Public read feed snapshots"
   on public.feed_snapshots for select
   using (true);

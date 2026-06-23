@@ -1,11 +1,7 @@
 /**
- * Workbench — Layers tab (Phase 3).
- *
- * All globe layer toggles grouped by archetype (event / field / track /
- * basemap) with live health chips from `getLayerHealth`. Replaces the layer
- * sections of the old SettingsPanel.
+ * Workbench — Layers tab with reference/derived groups and visual grammar legend.
  */
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useAtlasStore } from '../../store/atlasStore'
 import { GIBS_IMAGERY_LAYERS } from '../../config/gibsBasemap'
 import {
@@ -25,7 +21,6 @@ const HEALTH_COLORS = {
   stale: '#9ad4ff',
 }
 
-/** Icon + description per layer key (catalog stays presentation-free). */
 const LAYER_META = {
   gdeltSignals: { icon: '⚔', desc: 'High-confidence CAMEO events (multi-source or high severity)' },
   firms: { icon: '🔥', desc: 'Active fire & thermal anomaly data' },
@@ -40,6 +35,9 @@ const LAYER_META = {
   adsbMilitary: { icon: '🛩', desc: 'Military ICAO hex filter — distinct orange sprites' },
   satellites: { icon: '🛰', desc: 'CelesTrak TLE catalog propagated client-side' },
   ais: { icon: '🚢', desc: 'Live ships at maritime chokepoints via AISStream.io ($0, API key required)' },
+  referenceNuclear: { icon: '☢', desc: 'Static nuclear facility context — not live events' },
+  referenceChokepoints: { icon: '⚓', desc: 'Maritime chokepoint reference anchors' },
+  derivedSignals: { icon: '◆', desc: 'Synthesized cross-feed anomalies (opt-in)' },
   gibsTrueColor: { icon: '🛰', desc: GIBS_IMAGERY_LAYERS.gibsTrueColor?.desc },
   gibsFires: { icon: '🔥', desc: GIBS_IMAGERY_LAYERS.gibsFires?.desc },
   gibsAerosol: { icon: '🛰', desc: GIBS_IMAGERY_LAYERS.gibsAerosol?.desc },
@@ -51,9 +49,19 @@ const LAYER_META = {
 
 const GROUPS = [
   { kind: 'event', label: 'Event Layers', hint: 'Discrete pins, clustered — authoritative feeds + high-confidence CAMEO' },
-  { kind: 'field', label: 'Field Layers', hint: 'Aggregate surfaces — the calm monitor view' },
+  { kind: 'field', label: 'Field Layers', hint: 'Aggregate surfaces — overlay legend appears on globe when active' },
   { kind: 'track', label: 'Track Layers', hint: 'Ambient live entities — aircraft, vessels, satellites' },
+  { kind: 'reference', label: 'Reference Layers', hint: 'Static context — hollow ring markers, no pulse or corroboration' },
+  { kind: 'derived', label: 'Derived Layers', hint: 'Synthesized signals from triage anomalies — amber diamond badges' },
   { kind: 'basemap', label: 'Basemap', hint: 'Imagery & context overlays' },
+]
+
+const GRAMMAR_ROWS = [
+  { key: 'pin', swatch: '●', label: 'Pin', desc: 'Incident — size = severity, opacity = corroboration, pulse = recency' },
+  { key: 'track', swatch: '➤', label: 'Track', desc: 'Live telemetry — fixed sprite, no Street View' },
+  { key: 'field', swatch: '▢', label: 'Field', desc: 'Surface overlay — choropleth, heatmap, wind (no point icon)' },
+  { key: 'reference', swatch: '○', label: 'Reference', desc: 'Static context — muted 12px hollow ring, never pulses' },
+  { key: 'derived', swatch: '◆', label: 'Derived', desc: 'Synthesis — amber diamond, slow breathe, confidence badge' },
 ]
 
 function LayerStatusChip({ layerKey, healthCtx }) {
@@ -82,10 +90,39 @@ function LayerStatusChip({ layerKey, healthCtx }) {
   )
 }
 
+function VisualGrammarLegend() {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="settings-section atlas-grammar-legend">
+      <button
+        type="button"
+        className="atlas-grammar-legend-toggle"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <span className="settings-section-label" style={{ margin: 0 }}>Visual Grammar</span>
+        <span className="atlas-grammar-chevron">{open ? '▾' : '▸'}</span>
+      </button>
+      {open && (
+        <div className="atlas-grammar-rows">
+          {GRAMMAR_ROWS.map((row) => (
+            <div key={row.key} className={`atlas-grammar-row atlas-grammar-row--${row.key}`}>
+              <span className="atlas-grammar-swatch">{row.swatch}</span>
+              <span className="atlas-grammar-label">{row.label}</span>
+              <span className="atlas-grammar-desc">{row.desc}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function LayersTab() {
   const dataLayers = useAtlasStore((s) => s.dataLayers)
   const sourceStatuses = useAtlasStore((s) => s.sourceStatuses)
   const events = useAtlasStore((s) => s.events)
+  const anomalies = useAtlasStore((s) => s.anomalies)
   const globeMode = useAtlasStore((s) => s.globeMode)
   const gdeltGeoBootstrap = useAtlasStore((s) => s.gdeltGeoBootstrap)
   const gdeltCountryAggregates = useAtlasStore((s) => s.gdeltCountryAggregates)
@@ -97,6 +134,7 @@ export default function LayersTab() {
     sourceStatuses,
     globeMode,
     events,
+    anomalies,
     gdeltGeoBootstrap,
     gdeltCountryAggregates,
   }
@@ -113,6 +151,7 @@ export default function LayersTab() {
 
   return (
     <div style={{ padding: '4px 16px 16px' }}>
+      <VisualGrammarLegend />
       {grouped.map((group) => (
         <div key={group.kind} className="settings-section">
           <div className="settings-section-label">{group.label}</div>

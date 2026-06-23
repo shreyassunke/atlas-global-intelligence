@@ -32,7 +32,6 @@ export const TICKER_SOURCE_IDS = [
   'noaa-solar-wind',
   'bluesky',
   'fact-check',
-  'acled',
   'finnhub',
   'fred',
   'eia',

@@ -17,12 +17,13 @@
  */
 
 import { unzipSync, strFromU8 } from 'fflate'
+import { gdeltDataProxyFile, gdeltDataProxyUrl } from '../../utils/gdeltProxyUrl.js'
 
 /** Allowlist of candidate index files GDELT has used for the VGKG stream. */
 const VGKG_INDEX_CANDIDATES = [
-  'http://data.gdeltproject.org/gdeltv2/lastupdate-gvkg.txt',
-  'http://data.gdeltproject.org/gdeltv2/lastupdate-translation.txt',
-  'http://data.gdeltproject.org/gdeltv2/lastupdate.txt',
+  gdeltDataProxyFile('gdeltv2/lastupdate-gvkg.txt'),
+  gdeltDataProxyFile('gdeltv2/lastupdate-translation.txt'),
+  gdeltDataProxyFile('gdeltv2/lastupdate.txt'),
 ]
 
 /** Strict allowlist — anything else is an SSRF risk. */
@@ -52,7 +53,7 @@ async function resolveVgkgZipUrl() {
       if (!line) continue
       const parts = line.trim().split(/\s+/)
       const url = parts[parts.length - 1]
-      if (url && VGKG_ZIP_RE.test(url)) return url
+      if (url && VGKG_ZIP_RE.test(url)) return gdeltDataProxyUrl(url)
     } catch {
       /* try next */
     }

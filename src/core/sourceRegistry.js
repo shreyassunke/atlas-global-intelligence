@@ -34,6 +34,7 @@ export const SOURCE_CATALOG = {
   'gdelt-vgkg':     { name: 'GDELT Visual GKG',      module: MODULES.NEWS,          dimension: DIMENSIONS.NARRATIVE,    authoritative: false, requiresKey: false,  pollInterval: 1_800_000 },
   firms:            { name: 'NASA FIRMS',             module: MODULES.ENVIRONMENT,   dimension: DIMENSIONS.ENVIRONMENT,  authoritative: true,  requiresKey: true,   pollInterval: 600_000 },
   ucdp:             { name: 'UCDP Conflict',          module: MODULES.CONFLICT,      dimension: DIMENSIONS.SAFETY,       authoritative: false, requiresKey: false,  pollInterval: 600_000 },
+  acled:            { name: 'ACLED Conflict Events',  module: MODULES.CONFLICT,      dimension: DIMENSIONS.SAFETY,       authoritative: true,  requiresKey: true,   pollInterval: 300_000, apiKeyHelpUrl: 'https://acleddata.com/data-export-tool/' },
   coingecko:        { name: 'CoinGecko',              module: MODULES.FINANCIAL,     dimension: DIMENSIONS.ECONOMY,      authoritative: false, requiresKey: false,  pollInterval: 300_000 },
   'alt-fng':        { name: 'Fear & Greed Index',     module: MODULES.PREDICTION,    dimension: DIMENSIONS.ECONOMY,      authoritative: false, requiresKey: false,  pollInterval: 900_000 },
   'cisa-kev':       { name: 'CISA KEV',               module: MODULES.CYBER,         dimension: DIMENSIONS.SAFETY,       authoritative: true,  requiresKey: false,  pollInterval: 300_000 },

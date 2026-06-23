@@ -1,6 +1,7 @@
 import { useRef, useEffect, useMemo, useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAtlasStore } from '../../store/atlasStore'
+import { isTickerFeedEvent } from '../../core/sourceGeolocation'
 import { CATEGORIES } from '../../utils/categoryColors'
 import { DIMENSION_COLORS, DIMENSION_LABELS, DIMENSION_ICONS, DIMENSION_KEYS } from '../../core/eventSchema'
 import { legacyCategoryToDimension } from '../../utils/categoryColors'
@@ -31,12 +32,17 @@ export default function LiveTicker() {
   const feedRef = useRef(null)
 
   const tickerItems = useMemo(() => {
-    // Phase 3 — ticker is the sole home of commercial news + GDELT DOC
-    // articles; P1 events keep priority slots at the top of the rotation.
+    // Ticker: approximate / unmapped sources + commercial news.
+    // P1 globe events still surface here for breaking visibility.
     const eventItems = events
-      .filter(e => e.priority === 'p1')
-      .sort((a, b) => b.severity - a.severity || new Date(b.timestamp) - new Date(a.timestamp))
-      .slice(0, 30)
+      .filter(isTickerFeedEvent)
+      .sort((a, b) => {
+        const pr = { p1: 3, p2: 2, p3: 1 }
+        const pd = (pr[b.priority] || 0) - (pr[a.priority] || 0)
+        if (pd !== 0) return pd
+        return b.severity - a.severity || new Date(b.timestamp) - new Date(a.timestamp)
+      })
+      .slice(0, 35)
       .map(e => ({
         id: `evt_${e.id}`,
         isEvent: true,
@@ -48,25 +54,6 @@ export default function LiveTicker() {
         priority: e.priority,
         time: e.timestamp,
         severity: e.severity,
-      }))
-
-    // GDELT DOC articles — country-centroid geocodes routed off the globe
-    // (Phase 1b); they surface here and in the expanded feed instead.
-    const docItems = events
-      .filter(e => e.priority !== 'p1' && e.tags?.includes('news') && e.tags?.includes('gdelt'))
-      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
-      .slice(0, 20)
-      .map(e => ({
-        id: `evt_${e.id}`,
-        isEvent: true,
-        event: e,
-        title: e.title,
-        source: e.source,
-        color: DIMENSION_COLORS[e.dimension] || '#1a90ff',
-        dimension: e.dimension,
-        priority: e.priority,
-        time: e.timestamp,
-        severity: 0,
       }))
 
     const newsTickerItems = newsItems
@@ -90,14 +77,15 @@ export default function LiveTicker() {
         }
       })
 
-    return [...eventItems, ...docItems, ...newsTickerItems]
+    return [...eventItems, ...newsTickerItems]
       .sort((a, b) => b.severity - a.severity || new Date(b.time) - new Date(a.time))
       .slice(0, 40)
   }, [events, newsItems])
 
   const feedItems = useMemo(() => {
     const evtFeed = events
-      .sort((a, b) => b.severity - a.severity)
+      .filter(isTickerFeedEvent)
+      .sort((a, b) => b.severity - a.severity || new Date(b.timestamp) - new Date(a.timestamp))
       .slice(0, 40)
       .map(e => ({
         id: `evt_${e.id}`,

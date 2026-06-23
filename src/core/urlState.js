@@ -135,6 +135,11 @@ export function serializeAtlasUrlState(state) {
     params.set('dossier', state.dossierCode)
   }
 
+  // Investigation workspace deep link
+  if (state.workspaceId) {
+    params.set('ws', state.workspaceId)
+  }
+
   return params
 }
 
@@ -192,6 +197,11 @@ export function deserializeAtlasUrlState(searchParams, baseLayers = URL_LAYER_DE
   if (params.has('dossier')) {
     const code = params.get('dossier').trim()
     if (code) out.dossierCode = code.slice(0, 64)
+  }
+
+  if (params.has('ws')) {
+    const ws = params.get('ws').trim()
+    if (ws) out.workspaceId = ws.slice(0, 64)
   }
 
   // Legacy dimension-only URLs still work via deserializeFilters

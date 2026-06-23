@@ -1,7 +1,11 @@
 /**
  * GET /api/opensky-states
- * ADS-B proxy — primary: adsb.lol (free, no key). Fallback: OpenSky Network.
- * Returns OpenSky-compatible { time, states } so the worker normalizer is unchanged.
+ * ADS-B proxy — primary: adsb.lol global + regional bbox supplements.
+ * Fallback: OpenSky Network bbox fan-out.
+ *
+ * Query:
+ *   ?strategy=global   — global adsb.lol only (legacy)
+ *   ?strategy=regional — multi-region merge (default)
  */
 
 export const config = {
@@ -9,7 +13,19 @@ export const config = {
 }
 
 const CACHE_MS = 12_000
-/** @type {{ body: string, status: number, ts: number, provider?: string } | null} */
+
+/** OpenSky bbox regions for supplemental coverage (lamin/lomin/lamax/lomax). */
+const ADSB_REGIONS = [
+  { id: 'north-america', lamin: 15, lomin: -170, lamax: 72, lomax: -50 },
+  { id: 'south-america', lamin: -56, lomin: -82, lamax: 15, lomax: -30 },
+  { id: 'europe', lamin: 35, lomin: -15, lamax: 72, lomax: 45 },
+  { id: 'middle-east', lamin: 10, lomin: 30, lamax: 42, lomax: 65 },
+  { id: 'africa', lamin: -35, lomin: -18, lamax: 38, lomax: 52 },
+  { id: 'asia', lamin: -10, lomin: 60, lamax: 55, lomax: 150 },
+  { id: 'oceania', lamin: -48, lomin: 110, lamax: 10, lomax: 180 },
+]
+
+/** @type {{ body: string, status: number, ts: number, provider?: string, strategy?: string } | null} */
 let cache = null
 
 function knotsToMs(knots) {
@@ -49,7 +65,26 @@ function adsbLolToOpenSky(ac) {
   return { time: Math.floor(Date.now() / 1000), states }
 }
 
-async function fetchAdsbLol() {
+/**
+ * Merge OpenSky state arrays by ICAO24 hex.
+ * @param {object[]} payloads
+ */
+function mergeStatePayloads(payloads) {
+  const byHex = new Map()
+  for (const payload of payloads) {
+    for (const state of payload?.states || []) {
+      if (!state?.[0]) continue
+      byHex.set(String(state[0]).toLowerCase(), state)
+    }
+  }
+  return {
+    time: Math.floor(Date.now() / 1000),
+    states: [...byHex.values()],
+    regionCount: payloads.length,
+  }
+}
+
+async function fetchAdsbLolGlobal() {
   const urls = [
     'https://api.adsb.lol/v2/0/0',
     'https://api.airplanes.live/v2/0/0',
@@ -71,9 +106,7 @@ async function fetchAdsbLol() {
         lastErr = new Error('adsb.lol empty response')
         continue
       }
-      const body = JSON.stringify(adsbLolToOpenSky(ac))
-      cache = { body, status: 200, ts: Date.now(), provider: 'adsb.lol' }
-      return { status: 200, body, provider: 'adsb.lol' }
+      return adsbLolToOpenSky(ac)
     } catch (err) {
       lastErr = err
     }
@@ -81,46 +114,46 @@ async function fetchAdsbLol() {
   throw lastErr || new Error('adsb.lol unavailable')
 }
 
-async function fetchOpenSky(retries = 2) {
-  let lastStatus = 502
-  let lastErr
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const upstream = await fetch('https://opensky-network.org/api/states/all', {
-        headers: { Accept: 'application/json' },
-        signal: AbortSignal.timeout(20_000),
-      })
-      lastStatus = upstream.status
-      if (upstream.status === 429) {
-        if (cache && Date.now() - cache.ts < CACHE_MS * 3) {
-          return { status: 200, body: cache.body, stale: true, provider: cache.provider || 'opensky' }
-        }
-        if (attempt < retries) {
-          await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)))
-          continue
-        }
-        const body = await upstream.text()
-        return { status: 429, body }
-      }
-      const body = await upstream.text()
-      if (upstream.ok) {
-        cache = { body, status: upstream.status, ts: Date.now(), provider: 'opensky' }
-      }
-      return { status: upstream.status, body, provider: 'opensky' }
-    } catch (err) {
-      lastErr = err
-      if (attempt < retries) await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)))
-    }
-  }
-  if (cache) return { status: 200, body: cache.body, stale: true, provider: cache.provider || 'opensky' }
-  throw lastErr || new Error(`OpenSky proxy failed (HTTP ${lastStatus})`)
+async function fetchOpenSkyRegion(region) {
+  const qs = `lamin=${region.lamin}&lomin=${region.lomin}&lamax=${region.lamax}&lomax=${region.lomax}`
+  const upstream = await fetch(`https://opensky-network.org/api/states/all?${qs}`, {
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(20_000),
+  })
+  if (!upstream.ok) throw new Error(`OpenSky ${region.id} HTTP ${upstream.status}`)
+  return upstream.json()
 }
 
-async function fetchAircraftStates() {
-  try {
-    return await fetchAdsbLol()
-  } catch {
-    return fetchOpenSky()
+async function fetchRegionalOpenSky() {
+  const results = await Promise.allSettled(ADSB_REGIONS.map((r) => fetchOpenSkyRegion(r)))
+  const payloads = results
+    .filter((r) => r.status === 'fulfilled' && r.value?.states?.length)
+    .map((r) => r.value)
+  if (!payloads.length) throw new Error('All regional OpenSky fetches failed')
+  return mergeStatePayloads(payloads)
+}
+
+/**
+ * @param {'global' | 'regional'} strategy
+ */
+async function fetchAircraftStates(strategy) {
+  if (strategy === 'global') {
+    const payload = await fetchAdsbLolGlobal()
+    return { payload, provider: 'adsb.lol', strategy }
+  }
+
+  const regionalPromise = fetchRegionalOpenSky()
+  const globalPromise = fetchAdsbLolGlobal().catch(() => null)
+
+  const [regional, global] = await Promise.all([regionalPromise, globalPromise])
+  const merged = global?.states?.length
+    ? mergeStatePayloads([regional, global])
+    : regional
+
+  return {
+    payload: merged,
+    provider: global ? 'adsb.lol+opensky-regional' : 'opensky-regional',
+    strategy: 'regional',
   }
 }
 
@@ -143,7 +176,11 @@ export default async function handler(req) {
     })
   }
 
-  if (cache && Date.now() - cache.ts < CACHE_MS) {
+  const url = new URL(req.url)
+  const strategy = url.searchParams.get('strategy') === 'global' ? 'global' : 'regional'
+  const cacheKey = strategy
+
+  if (cache && Date.now() - cache.ts < CACHE_MS && cache.strategy === cacheKey) {
     return new Response(cache.body, {
       status: 200,
       headers: {
@@ -152,23 +189,39 @@ export default async function handler(req) {
         'Cache-Control': 'public, max-age=8, stale-while-revalidate=30',
         'X-Atlas-Cache': 'hit',
         'X-Atlas-Provider': cache.provider || 'unknown',
+        'X-Atlas-Strategy': cache.strategy || strategy,
       },
     })
   }
 
   try {
-    const { status, body, stale, provider } = await fetchAircraftStates()
+    const { payload, provider, strategy: usedStrategy } = await fetchAircraftStates(strategy)
+    const body = JSON.stringify(payload)
+    cache = { body, status: 200, ts: Date.now(), provider, strategy: usedStrategy }
     return new Response(body, {
-      status,
+      status: 200,
       headers: {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*',
-        'Cache-Control': stale ? 'public, max-age=4, stale-while-revalidate=60' : 'public, max-age=10, stale-while-revalidate=30',
-        'X-Atlas-Provider': provider || 'unknown',
-        ...(stale ? { 'X-Atlas-Stale': 'rate-limit-fallback' } : {}),
+        'Cache-Control': 'public, max-age=10, stale-while-revalidate=30',
+        'X-Atlas-Provider': provider,
+        'X-Atlas-Strategy': usedStrategy,
+        'X-Atlas-Aircraft-Count': String(payload.states?.length || 0),
       },
     })
   } catch (err) {
+    if (cache) {
+      return new Response(cache.body, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control': 'public, max-age=4, stale-while-revalidate=60',
+          'X-Atlas-Stale': 'rate-limit-fallback',
+          'X-Atlas-Provider': cache.provider || 'unknown',
+        },
+      })
+    }
     return new Response(JSON.stringify({ error: err.message || 'ADS-B proxy failed' }), {
       status: 502,
       headers: {

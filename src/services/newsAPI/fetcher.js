@@ -89,8 +89,8 @@ function createProviderFetcher(provider, options) {
           result = await fetchGNews(key, {
             selectedSources: options.selectedSources,
             catalog: options.catalog,
-            targetArticles: broaden ? 200 : 120,
-            maxCountries: broaden ? 16 : 12,
+            targetArticles: broaden ? 160 : 100,
+            maxCountries: broaden ? 8 : 6,
             maxPerRequest: 10,
           })
         } else if (provider.id === 'thenewsapi') {

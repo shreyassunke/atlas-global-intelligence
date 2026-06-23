@@ -15,8 +15,9 @@ import DossierTab from './DossierTab'
 import AnalyticsTab from '../UI/GDELTAnalyticsPanel'
 import LayersTab from './LayersTab'
 import PreferencesTab from './PreferencesTab'
+import InvestigationCanvas from '../Workspace/InvestigationCanvas'
 
-const TABS = [
+const BASE_TABS = [
   { id: 'triage', label: 'Triage' },
   { id: 'dossier', label: 'Dossier' },
   { id: 'analytics', label: 'Analytics' },
@@ -24,10 +25,15 @@ const TABS = [
   { id: 'settings', label: 'Settings' },
 ]
 
+const CANVAS_TAB = { id: 'canvas', label: 'Canvas' }
+
 export default function Workbench() {
   const workbench = useAtlasStore((s) => s.ui.workbench)
+  const activeWorkspaceId = useAtlasStore((s) => s.activeWorkspaceId)
   const openWorkbench = useAtlasStore((s) => s.openWorkbench)
   const closeWorkbench = useAtlasStore((s) => s.closeWorkbench)
+
+  const tabs = activeWorkspaceId ? [CANVAS_TAB, ...BASE_TABS] : BASE_TABS
 
   return (
     <AnimatePresence>
@@ -43,7 +49,7 @@ export default function Workbench() {
           transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
         >
           <div className="workbench-tabs">
-            {TABS.map((t) => (
+            {tabs.map((t) => (
               <button
                 key={t.id}
                 type="button"
@@ -64,6 +70,7 @@ export default function Workbench() {
           </div>
 
           <div className="workbench-body">
+            {workbench === 'canvas' && <InvestigationCanvas />}
             {workbench === 'triage' && <TriageTab />}
             {workbench === 'dossier' && <DossierTab />}
             {workbench === 'analytics' && <AnalyticsTab />}

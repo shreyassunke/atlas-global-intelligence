@@ -1,8 +1,9 @@
 /**
  * YouTube Data API v3 adapter — search + optional live filter.
- * Free daily quota: 10,000 units (search.list costs ~100 units per call).
- * Returns articles in the normalized shape expected by processArticles.
+ * Production uses /api/news-proxy (server-side key, no CORS).
  */
+
+import { newsProxyUrl, useNewsProxy } from '../../../utils/newsProxyUrl.js'
 
 const FETCH_TIMEOUT_MS = 8000
 const DEFAULT_QUERIES = ['breaking news live', 'world conflict live', 'geopolitical crisis']
@@ -38,29 +39,35 @@ function normalizeVideoItem(item) {
   }
 }
 
+function buildSearchUrl(apiKey, q, maxPerQuery) {
+  const params = {
+    part: 'snippet',
+    q,
+    type: 'video',
+    order: 'date',
+    maxResults: String(maxPerQuery),
+    relevanceLanguage: 'en',
+  }
+  if (useNewsProxy()) return newsProxyUrl('youtube', params)
+  const sp = new URLSearchParams({ ...params, key: apiKey })
+  return `https://www.googleapis.com/youtube/v3/search?${sp}`
+}
+
 export async function fetchYouTubeVideos(apiKey, { queries, maxPerQuery = MAX_RESULTS_PER_QUERY } = {}) {
-  if (!apiKey) return { articles: [], rateLimited: false }
+  const hasKey = useNewsProxy() || apiKey
+  if (!hasKey) return { articles: [], rateLimited: false }
 
   const searchQueries = queries && queries.length > 0
     ? queries
-    : (import.meta.env.VITE_YOUTUBE_SEARCH_QUERIES || '').split(',').map(s => s.trim()).filter(Boolean)
+    : (import.meta.env.VITE_YOUTUBE_SEARCH_QUERIES || '').split(',').map((s) => s.trim()).filter(Boolean)
 
   const effectiveQueries = searchQueries.length > 0 ? searchQueries : DEFAULT_QUERIES
 
   const articles = []
   const seen = new Set()
 
-  const fetches = effectiveQueries.map((q) => {
-    const params = new URLSearchParams({
-      part: 'snippet',
-      q,
-      type: 'video',
-      order: 'date',
-      maxResults: String(maxPerQuery),
-      relevanceLanguage: 'en',
-      key: apiKey,
-    })
-    return fetchWithTimeout(`https://www.googleapis.com/youtube/v3/search?${params}`)
+  const fetches = effectiveQueries.map((q) =>
+    fetchWithTimeout(buildSearchUrl(apiKey, q, maxPerQuery))
       .then(async (res) => {
         const data = await res.json().catch(() => ({}))
         if (!res.ok) {
@@ -69,7 +76,6 @@ export async function fetchYouTubeVideos(apiKey, { queries, maxPerQuery = MAX_RE
               '[TATVA] YouTube search failed:',
               res.status,
               data?.error?.message || data?.error || res.statusText,
-              '(check API key restrictions: enable YouTube Data API v3 for this key, HTTP referrer for browser)',
             )
           }
           return null
@@ -89,8 +95,8 @@ export async function fetchYouTubeVideos(apiKey, { queries, maxPerQuery = MAX_RE
       .catch((err) => {
         if (import.meta.env.DEV) console.warn('[TATVA] YouTube search request failed:', err?.message || err)
         return null
-      })
-  })
+      }),
+  )
 
   await Promise.allSettled(fetches)
 

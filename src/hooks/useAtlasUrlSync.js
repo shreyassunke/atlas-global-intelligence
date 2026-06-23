@@ -23,6 +23,7 @@ function pickUrlSyncState(state) {
     dossierCode: state.ui.workbench === 'dossier' && state.dossier
       ? (state.dossier.iso || state.dossier.fips || state.dossier.name)
       : null,
+    workspaceId: state.activeWorkspaceId || null,
   }
 }
 
@@ -83,6 +84,12 @@ export function useAtlasUrlSync(enabled = true) {
           if (hit) useAtlasStore.getState().openDossier(hit)
         })
         .catch(() => { /* dossier deep link is best-effort */ })
+    }
+
+    if (partial.workspaceId && store.user) {
+      store.loadWorkspaces().then(() => {
+        useAtlasStore.getState().openWorkspace(partial.workspaceId)
+      })
     }
 
     hydratedRef.current = true

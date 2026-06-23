@@ -1,3 +1,5 @@
+import { newsProxyUrl, useNewsProxy } from './newsProxyUrl.js'
+
 const SOURCES_CACHE_KEY = 'atlas_source_catalog'
 const SOURCES_CACHE_TTL = 24 * 60 * 60 * 1000
 
@@ -122,12 +124,13 @@ export async function fetchAllSources(apiKey) {
   const cached = loadCachedCatalog()
   if (cached) return cached
 
-  if (!apiKey) return NEWS_SOURCES
+  if (!apiKey && !useNewsProxy()) return NEWS_SOURCES
 
   try {
-    const res = await fetch(
-      `https://newsapi.org/v2/top-headlines/sources?apiKey=${apiKey}`,
-    )
+    const url = useNewsProxy()
+      ? newsProxyUrl('newsapi', { endpoint: 'top-headlines/sources' })
+      : `https://newsapi.org/v2/top-headlines/sources?apiKey=${apiKey}`
+    const res = await fetch(url)
     const data = await res.json()
 
     if (data.status !== 'ok' || !Array.isArray(data.sources)) return NEWS_SOURCES

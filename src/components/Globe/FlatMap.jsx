@@ -13,6 +13,7 @@ import { terminatorGeoJsonLine } from '../../core/solarTerminator'
 import {
   useGlobeViewModels,
   applyMarkerClick,
+  applyGlobeMapClick,
   resolveFlyToTarget,
 } from '../../globe-core'
 import { showDetectionLabel as getDetectionLabel } from '../../core/detectionLabels'
@@ -419,6 +420,19 @@ export default function FlatMap({ onGlobeReady }) {
             /* ignore */
           }
         }
+      })
+
+      map.on('click', (e) => {
+        const hits = map.queryRenderedFeatures(e.point, { layers: ['events-circle'] })
+        if (hits.length) return
+        applyGlobeMapClick({ lat: e.lngLat.lat, lng: e.lngLat.lng })
+      })
+
+      map.on('mouseenter', 'countries-fill', () => {
+        if (mapRef.current) mapRef.current.getCanvas().style.cursor = 'pointer'
+      })
+      map.on('mouseleave', 'countries-fill', () => {
+        if (mapRef.current) mapRef.current.getCanvas().style.cursor = ''
       })
       map.on('mouseenter', 'events-circle', () => {
         if (mapRef.current) mapRef.current.getCanvas().style.cursor = 'pointer'

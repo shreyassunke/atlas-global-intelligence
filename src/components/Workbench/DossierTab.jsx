@@ -41,6 +41,8 @@ import GdeltAttribution from '../UI/GdeltAttribution'
 import { DIMENSION_COLORS, DIMENSION_ICONS, DIMENSION_LABELS, formatToneScore } from '../../core/eventSchema'
 import { buildDossierBriefMarkdown, downloadMarkdownBrief } from '../../core/briefExport'
 import { buildShareUrl } from '../../core/urlState'
+import ReportExportPanel from '../UI/ReportExportPanel'
+import { fetchPlaceIndicators } from '../../services/indicators/indicatorService'
 
 // ── Shared chart styling (mirrors GDELTAnalyticsPanel) ──
 const AXIS_TICK = { fill: 'rgba(255,255,255,0.35)', fontSize: 9 }
@@ -196,10 +198,21 @@ export default function DossierTab() {
   const setSelectedEvent = useAtlasStore((s) => s.setSelectedEvent)
   const flyToLocation = useAtlasStore((s) => s.flyToLocation)
   const pushToast = useAtlasStore((s) => s.pushToast)
+  const reportExportOpen = useAtlasStore((s) => s.ui.reportExportOpen)
+  const clearReportExportRequest = useAtlasStore((s) => s.clearReportExportRequest)
 
   const [data, setData] = useState(EMPTY_DATA)
   const [loading, setLoading] = useState(false)
   const [refreshTick, setRefreshTick] = useState(0)
+  const [showReportExport, setShowReportExport] = useState(false)
+  const [indicators, setIndicators] = useState([])
+
+  useEffect(() => {
+    if (reportExportOpen) {
+      setShowReportExport(true)
+      clearReportExportRequest()
+    }
+  }, [reportExportOpen, clearReportExportRequest])
 
   const quickPicks = useQuickPicks(!target)
   const timespan = useMemo(() => timespanFromTimeFilter(timeFilter), [timeFilter])
@@ -319,6 +332,29 @@ export default function DossierTab() {
     }
   }, [target, docQuery, timespan, refreshTick])
 
+  // Macro indicators for export + dossier context
+  useEffect(() => {
+    if (!target) {
+      setIndicators([])
+      return undefined
+    }
+    let cancelled = false
+    const controller = new AbortController()
+    fetchPlaceIndicators({
+      iso: target.iso,
+      countryName: target.name,
+      lat: target.lat,
+      lng: target.lng,
+      signal: controller.signal,
+    })
+      .then((rows) => { if (!cancelled) setIndicators(rows) })
+      .catch(() => { if (!cancelled) setIndicators([]) })
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
+  }, [target?.iso, target?.name, target?.lat, target?.lng])
+
   const handleSignalClick = (evt) => {
     setSelectedEvent(evt)
     if (evt.lat != null && evt.lng != null) flyToLocation({ lat: evt.lat, lng: evt.lng })
@@ -437,10 +473,17 @@ export default function DossierTab() {
             </button>
             <button
               type="button"
-              className="rounded-md border border-sky-400/20 bg-sky-400/10 px-2 py-1 text-[9px] uppercase tracking-widest text-sky-200/80 transition hover:bg-sky-400/20"
+              className="rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-1 text-[9px] uppercase tracking-widest text-white/55 transition hover:bg-white/[0.08]"
               onClick={handleExport}
             >
-              Export brief
+              Export MD
+            </button>
+            <button
+              type="button"
+              className="rounded-md border border-sky-400/20 bg-sky-400/10 px-2 py-1 text-[9px] uppercase tracking-widest text-sky-200/80 transition hover:bg-sky-400/20"
+              onClick={() => setShowReportExport((v) => !v)}
+            >
+              {showReportExport ? 'Hide report' : 'Export report'}
             </button>
           </div>
         </div>
@@ -479,6 +522,18 @@ export default function DossierTab() {
           )}
         </div>
       </header>
+
+      {showReportExport && (
+        <ReportExportPanel
+          dossierContext={{
+            target,
+            dossierData: { ...data, indicators },
+            signals: countryEvents,
+            timeFilter,
+          }}
+          onClose={() => setShowReportExport(false)}
+        />
+      )}
 
       {/* ── Trend ── */}
       <Section title="Coverage volume" provenance="GDELT DOC 2.0">

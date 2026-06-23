@@ -22,8 +22,6 @@ import { useAtlasStore } from '../../store/atlasStore'
 import { requestSnapshot } from '../../core/eventBus'
 import { getTimezoneViewCenter } from '../../utils/geo'
 import { detectQualityTier } from '../../config/qualityTiers'
-import { generateSprite } from '../../core/visualGrammar'
-import { NUCLEAR_FACILITIES } from '../../core/globeLayers'
 import {
   bucketCameraRangeM,
   computeOrbitArc,
@@ -35,8 +33,8 @@ import { aircraftSpriteDataUrl, satelliteSpriteDataUrl, vesselSpriteDataUrl } fr
 import {
   useGlobeViewModels,
   applyMarkerClick,
-  applyBackgroundClick,
   applyMarkerHover,
+  applyGlobeMapClick,
   resolveFlyToTarget,
   geoJsonToOuterRings,
 } from '../../globe-core'
@@ -169,26 +167,6 @@ function truncatePlaceLabel(s, maxLen = 72) {
   return t.length <= maxLen ? t : `${t.slice(0, maxLen - 1)}…`
 }
 
-function nuclearIconDataUrl() {
-  const c = document.createElement('canvas')
-  c.width = 20
-  c.height = 20
-  const ctx = c.getContext('2d')
-  ctx.beginPath()
-  ctx.arc(10, 10, 6, 0, Math.PI * 2)
-  ctx.fillStyle = 'rgba(220, 50, 50, 0.25)'
-  ctx.fill()
-  ctx.strokeStyle = 'rgba(220, 50, 50, 0.4)'
-  ctx.lineWidth = 1
-  ctx.stroke()
-  ctx.fillStyle = 'rgba(220, 50, 50, 0.4)'
-  ctx.font = '8px sans-serif'
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-  ctx.fillText('☢', 10, 10)
-  return c.toDataURL('image/png')
-}
-
 function Polyline3D({ coordinates, strokeColor, strokeWidth, outerColor, outerWidth }) {
   return createElement('gmp-polyline-3d', {
     altitudeMode: AltitudeMode.ABSOLUTE,
@@ -279,8 +257,6 @@ function InnerMap({ onGlobeReady }) {
   const maps3dLib = useMapsLibrary('maps3d')
   const vectorLayersReady = Boolean(maps3dLib)
 
-  const staticIcons = useMemo(() => ({ nuclear: nuclearIconDataUrl() }), [])
-
   const searchHighlight = useAtlasStore((s) => s.searchHighlight)
   const readyRef = useRef(false)
   const [globeMapReady, setGlobeMapReady] = useState(false)
@@ -292,10 +268,8 @@ function InnerMap({ onGlobeReady }) {
   const userGesturingRef = useRef(false)
   const activePointersRef = useRef(0)
   const spinRafRef = useRef(null)
-  const spriteCacheRef = useRef(new Map())
-
   const setZoomLevel = useAtlasStore((s) => s.setZoomLevel)
-  const openStreetView = useAtlasStore((s) => s.openStreetView)
+  const streetViewMode = useAtlasStore((s) => s.streetViewMode)
 
   const dataLayers = useAtlasStore((s) => s.dataLayers)
   const terminatorOn = dataLayers?.terminator !== false
@@ -314,6 +288,9 @@ function InnerMap({ onGlobeReady }) {
     aircraftMarkers,
     vesselMarkers,
     satelliteMarkers,
+    referenceMarkers,
+    derivedMarkers,
+    correlationArcs,
     clusters,
     choropleth,
     heatBins: heatBuckets,
@@ -359,15 +336,6 @@ function InnerMap({ onGlobeReady }) {
     })),
     [clusters],
   )
-
-  const getSprite = useCallback((priority, dimension) => {
-    const key = `${priority}_${dimension}`
-    if (spriteCacheRef.current.has(key)) return spriteCacheRef.current.get(key)
-    const canvas = generateSprite(priority, dimension, 64)
-    const url = canvas.toDataURL('image/png')
-    spriteCacheRef.current.set(key, url)
-    return url
-  }, [])
 
   const resetIdleTimer = useCallback(() => {
     if (!effectiveAutoRotateRef.current) return
@@ -428,10 +396,14 @@ function InnerMap({ onGlobeReady }) {
     (ev) => {
       const ll = literalLatLng(ev.detail?.position)
       if (!ll) return
-      if (applyBackgroundClick()) return
-      openStreetView({ lat: ll.lat, lng: ll.lng, source: 'globe' })
+      applyGlobeMapClick({
+        lat: ll.lat,
+        lng: ll.lng,
+        choroplethRows: choropleth,
+        streetViewMode,
+      })
     },
-    [openStreetView],
+    [choropleth, streetViewMode],
   )
 
   const onEventClick = useCallback(
@@ -774,20 +746,20 @@ function InnerMap({ onGlobeReady }) {
       tabIndex={-1}
       aria-label="3D globe"
       className={`fixed inset-0 z-0 outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/30 focus-visible:ring-offset-2 focus-visible:ring-offset-black/40${tacticalMode ? ' atlas-tactical-mode' : ''}`}
-      style={{ cursor: 'grab', touchAction: 'none' }}
+      style={{ cursor: streetViewMode ? 'crosshair' : 'grab', touchAction: 'none' }}
       onPointerDown={(e) => {
         activePointersRef.current += 1
         userGesturingRef.current = true
         idleSpinGateRef.current = false
         clearTimeout(idleTimerRef.current)
-        e.currentTarget.style.cursor = 'grabbing'
+        if (!streetViewMode) e.currentTarget.style.cursor = 'grabbing'
         if (e.button === 0) e.currentTarget.focus({ preventScroll: true })
       }}
       onPointerUp={(e) => {
         activePointersRef.current = Math.max(0, activePointersRef.current - 1)
         if (activePointersRef.current === 0) {
           userGesturingRef.current = false
-          e.currentTarget.style.cursor = 'grab'
+          e.currentTarget.style.cursor = streetViewMode ? 'crosshair' : 'grab'
           resetIdleTimer()
         }
       }}
@@ -956,27 +928,78 @@ function InnerMap({ onGlobeReady }) {
           </Marker3D>
         )}
 
-        {NUCLEAR_FACILITIES.map((nf) => (
+        {referenceMarkers.map((vm) => (
           <Marker3D
-            key={nf.name}
-            position={{ lat: nf.lat, lng: nf.lng }}
+            key={vm.id}
+            position={{ lat: vm.lat, lng: vm.lng }}
             drawsWhenOccluded
             collisionBehavior={CollisionBehavior.OPTIONAL_AND_HIDES_LOWER_PRIORITY}
+            title={vm.title}
             zIndex={0}
+            onClick={(e) => onEventClick(e, vm.raw)}
           >
-            <img src={staticIcons.nuclear} width={12} height={12} alt="" draggable={false} />
+            <img
+              src={vm.markerIconUrl}
+              width={vm.sizePx}
+              height={vm.sizePx}
+              alt=""
+              className="atlas-marker--reference"
+              draggable={false}
+            />
           </Marker3D>
+        ))}
+
+        {derivedMarkers.map((vm) => (
+          <Marker3D
+            key={vm.id}
+            position={{ lat: vm.lat, lng: vm.lng, altitude: 1200 }}
+            altitudeMode={AltitudeMode.RELATIVE_TO_GROUND}
+            drawsWhenOccluded
+            sizePreserved
+            collisionBehavior={CollisionBehavior.REQUIRED_AND_HIDES_OPTIONAL}
+            title={vm.title}
+            zIndex={8}
+            onClick={(e) => onEventClick(e, vm.raw)}
+          >
+            <img
+              src={vm.markerIconUrl}
+              width={vm.sizePx}
+              height={vm.sizePx}
+              alt=""
+              className={`atlas-marker--derived ${vm.animationClass || ''}`}
+              style={{ opacity: vm.opacity ?? 1 }}
+              draggable={false}
+            />
+          </Marker3D>
+        ))}
+
+        {correlationArcs.map((arc, i) => (
+          <Polyline3D
+            key={`corr-arc-${i}-${arc.label}`}
+            coordinates={[
+              { lat: arc.from.lat, lng: arc.from.lng, altitude: 8000 },
+              { lat: arc.to.lat, lng: arc.to.lng, altitude: 8000 },
+            ]}
+            strokeColor="rgba(240, 180, 41, 0.75)"
+            strokeWidth={2}
+            outerColor="rgba(240, 180, 41, 0.15)"
+            outerWidth={1}
+          />
         ))}
 
         {eventMarkers.map((vm, idx) => {
           const evt = vm.raw
-          const sprite = getSprite(vm.priority, vm.dimension)
+          const sprite = vm.markerIconUrl
+          if (!sprite && import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.warn('[GoogleGlobe] missing markerIconUrl for event', evt?.id, evt?.title)
+          }
           const pulseClass =
-            vm.recency !== 'static' && idx < 20 ? 'atlas-globe-event-pulse' : ''
+            vm.recency !== 'static' && idx < 20 ? 'atlas-marker--pin-pulse' : ''
           const detLabel = showDetectionLabel(evt, idx)
           return (
             <Marker3D
-              key={vm.id}
+              key={`${vm.id}-${vm.environmentHazard || 'evt'}`}
               position={{ lat: vm.lat, lng: vm.lng, altitude: 1400 }}
               altitudeMode={AltitudeMode.RELATIVE_TO_GROUND}
               drawsWhenOccluded
@@ -988,11 +1011,12 @@ function InnerMap({ onGlobeReady }) {
               onClick={(e) => onEventClick(e, evt)}
             >
               <img
+                key={sprite || vm.id}
                 src={sprite}
                 width={vm.sizePx}
                 height={vm.sizePx}
                 alt=""
-                className={pulseClass}
+                className={`atlas-marker--pin ${pulseClass}`}
                 style={{ opacity: vm.opacity ?? 1 }}
                 onMouseEnter={() => setPointerHover(evt)}
                 onMouseLeave={() => setPointerHover(null)}
@@ -1119,7 +1143,7 @@ function InnerMap({ onGlobeReady }) {
                   zIndex={30}
                   onClick={(e) => onEventClick(e, storm)}
                 >
-                  <img src={getSprite(storm.priority || 'p1', 'environment')} width={28} height={28} alt="" />
+                  <img src={storm.markerIconUrl || ''} width={28} height={28} alt="" />
                 </Marker3D>
               )}
             </React.Fragment>

@@ -6,10 +6,12 @@
  *   field   — aggregate surfaces (choropleth, heatmap, wind)
  *   track   — ambient live entities (aircraft, vessels, satellites)
  *   basemap — imagery/context overlays (GIBS, terminator)
+ *   reference — static context markers (nuclear, chokepoints)
+ *   derived — synthesized cross-feed signals (opt-in)
  */
 
 /** @typedef {'cesium'|'globegl'|'leaflet'} GlobeModeId */
-/** @typedef {'event'|'field'|'track'|'basemap'} LayerKind */
+/** @typedef {'event'|'field'|'track'|'basemap'|'reference'|'derived'} LayerKind */
 
 /**
  * @typedef {object} LayerCatalogEntry
@@ -31,6 +33,8 @@ export const LAYER_KINDS = /** @type {const} */ ({
   FIELD: 'field',
   TRACK: 'track',
   BASEMAP: 'basemap',
+  REFERENCE: 'reference',
+  DERIVED: 'derived',
 })
 
 /** @type {Record<string, LayerCatalogEntry>} */
@@ -86,6 +90,16 @@ export const LAYER_CATALOG = {
     kind: 'event',
     sources: ['noaa-nhc'],
     globeModes: ['cesium', 'globegl', 'leaflet'],
+    optIn: true,
+  },
+  conflictEvents: {
+    label: 'Conflict Events',
+    kind: 'event',
+    sources: ['acled', 'ucdp'],
+    globeModes: ['cesium', 'globegl', 'leaflet'],
+    apiKeyEnv: 'ACLED_KEY',
+    apiKeyServerOnly: false,
+    apiKeyHelpUrl: 'https://acleddata.com/data-export-tool/',
     optIn: true,
   },
   adsb: {
@@ -172,6 +186,27 @@ export const LAYER_CATALOG = {
     kind: 'field',
     globeModes: ['globegl'],
     globeModeNote: 'Globe.GL only — animated Open-Meteo wind field',
+    optIn: true,
+  },
+  referenceNuclear: {
+    label: 'Nuclear Facilities',
+    kind: 'reference',
+    sources: [],
+    globeModes: ['cesium', 'globegl', 'leaflet'],
+    optIn: true,
+  },
+  referenceChokepoints: {
+    label: 'Maritime Chokepoints',
+    kind: 'reference',
+    sources: [],
+    globeModes: ['cesium', 'globegl', 'leaflet'],
+    optIn: true,
+  },
+  derivedSignals: {
+    label: 'Derived Signals',
+    kind: 'derived',
+    sources: [],
+    globeModes: ['cesium', 'globegl', 'leaflet'],
     optIn: true,
   },
 }
@@ -348,6 +383,18 @@ export function getLayerHealth(layerKey, ctx) {
   }
   if (layerKey === 'terminator') {
     return { tone: 'ok', message: 'Line active' }
+  }
+
+  if (layerKey === 'referenceNuclear') {
+    return { tone: 'ok', message: '15 sites' }
+  }
+  if (layerKey === 'referenceChokepoints') {
+    return { tone: 'ok', message: '22 chokepoints' }
+  }
+  if (layerKey === 'derivedSignals') {
+    const count = (ctx.anomalies || []).length
+    if (count > 0) return { tone: 'ok', message: `${count} active` }
+    return { tone: 'empty', message: 'No synthesized signals yet' }
   }
 
   return { tone: 'ok', message: 'On' }

@@ -11,7 +11,7 @@ import { X, ChevronDown, ChevronRight } from 'lucide-react'
 import { useAtlasStore } from '../../store/atlasStore'
 import { isTickerFeedEvent, getEventSourceId } from '../../core/sourceGeolocation'
 import { cleanEventText, timeAgoLabel } from '../../utils/text.js'
-import { TierDot } from '../ui/provenance-chip.jsx'
+import { TierDot } from '../UI/provenance-chip.jsx'
 import { getSourceGeoTier } from '../../core/sourceGeolocation'
 import { isWithinAtlasCycle } from '../../core/atlasCycle'
 

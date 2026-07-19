@@ -8,7 +8,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAtlasStore } from '../../store/atlasStore'
 import { fetchPlaceIndicators, INDICATOR_POLL_MS } from '../../services/indicators/indicatorService.js'
-import { Tooltip } from '../ui/tooltip.jsx'
+import { Tooltip } from './tooltip.jsx'
 import { cn } from '../../lib/utils'
 
 function Sparkline({ values }) {

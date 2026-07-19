@@ -15,9 +15,9 @@ import { confidenceForEvent } from '../../core/triage'
 import { classifySatellitePurpose } from '../../core/satellitePurpose'
 import { loadCountryIndex, findCountry } from '../../services/countryIndex'
 import { cleanEventText, timeAgoLabel } from '../../utils/text.js'
-import { PriorityBadge } from '../ui/badge.jsx'
-import { ProvenanceChip } from '../ui/provenance-chip.jsx'
-import { TrustMeter } from '../ui/trust-meter.jsx'
+import { PriorityBadge } from '../UI/badge.jsx'
+import { ProvenanceChip } from '../UI/provenance-chip.jsx'
+import { TrustMeter } from '../UI/trust-meter.jsx'
 import {
   InspectorWindowControls,
   useInspectorWindow,

@@ -29,7 +29,6 @@ import {
   queryToThemeToken,
 } from '../../services/gdelt/bigqueryService'
 import { fetchGdeltSummary } from '../../services/gdelt/summaryService'
-import { DIMENSION_COLORS, DIMENSION_LABELS } from '../../core/eventSchema'
 import ForceNetworkGraph from './ForceNetworkGraph'
 import ClipGallery from './ClipGallery'
 import VgkgImageryPanel from './VgkgImageryPanel'
@@ -775,7 +774,7 @@ function RefreshFooter({ onClick, loading, children }) {
   )
 }
 
-// ── Workbench Analytics tab (Phase 3 — content-only, shell lives in Workbench.jsx) ──
+// ── Workbench Analytics tab (content-only; shell lives in Workbench.jsx) ──
 
 export default function AnalyticsTab() {
   const ctx = useAtlasStore((s) => s.gdeltAnalytics)
@@ -785,7 +784,7 @@ export default function AnalyticsTab() {
   const [tab, setTab] = useState('trends')
 
   const timespan = useMemo(() => timespanFromTimeFilter(timeFilter), [timeFilter])
-  const dimColor = ctx ? DIMENSION_COLORS[ctx.dimension] || '#378ADD' : '#378ADD'
+  const dimColor = '#1a90ff'
 
   // Reset back to Trends every time a new analysis is opened so users land on the default view.
   useEffect(() => {
@@ -820,7 +819,7 @@ export default function AnalyticsTab() {
               background: `color-mix(in srgb, ${dimColor} 12%, transparent)`,
             }}
           >
-            GDELT · {DIMENSION_LABELS[ctx.dimension] || ctx.dimension}
+            GDELT
           </div>
           <h2 className="mt-1.5 font-semibold leading-snug text-white/95" style={{ fontFamily: 'var(--font-ui)' }}>
             {ctx.label || 'Topic analytics'}
@@ -831,16 +830,15 @@ export default function AnalyticsTab() {
         </div>
         <button
           type="button"
-          className="shrink-0 rounded-lg px-2 py-1 text-sm text-white/50 transition hover:bg-white/5 hover:text-white/90"
+          className="shrink-0 rounded-lg px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-white/50 transition hover:bg-white/5 hover:text-white/90"
           onClick={() => closeGdeltAnalytics()}
-          aria-label="Close analytics"
+          aria-label="Clear analysis"
         >
-          ✕
+          Clear
         </button>
       </div>
 
       <div className="space-y-4 px-4 py-3">
-        {/* Tabs */}
         <div className="flex gap-1 rounded-md border border-white/5 bg-white/[0.02] p-1">
           {TABS.map((t) => (
             <button
@@ -858,7 +856,6 @@ export default function AnalyticsTab() {
           ))}
         </div>
 
-        {/* Timespan selector (BigQuery tabs own their own time range) */}
         {tab !== 'history' && tab !== 'network' && tab !== 'imagery' && tab !== 'themes' && (
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[8px] font-bold uppercase tracking-[0.2em] text-white/35">Timespan</span>

@@ -16,12 +16,6 @@ const DEFAULT_DIMENSIONS = ['safety', 'governance', 'economy', 'people', 'enviro
 
 let countryGeojsonPromise = null
 
-function passesPriorityFilter(evt, priorityFilter) {
-  if (priorityFilter === 'p1' && evt.priority !== 'p1') return false
-  if (priorityFilter === 'p1p2' && evt.priority === 'p3') return false
-  return true
-}
-
 function normalizeWorkspaceDimensions(activeDimensions) {
   if (!activeDimensions) return new Set(DEFAULT_DIMENSIONS)
   if (activeDimensions instanceof Set) {
@@ -142,9 +136,6 @@ export function eventMatchesWorkspace(workspace, event, options = {}) {
     workspace.active_dimensions || workspace.activeDimensions,
   )
   if (!dims.has(event.dimension)) return false
-
-  const priorityFilter = workspace.priority_filter || workspace.priorityFilter || 'p1p2'
-  if (!passesPriorityFilter(event, priorityFilter)) return false
 
   if (!passesDataLayers(event, workspace.data_layers || workspace.dataLayers)) return false
 

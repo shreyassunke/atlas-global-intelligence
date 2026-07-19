@@ -1,7 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { useAtlasStore } from '../../store/atlasStore'
-import { CATEGORIES } from '../../utils/categoryColors'
-import { DIMENSION_COLORS } from '../../core/eventSchema'
 
 export default function HoverLabel() {
   const hoveredMarker = useAtlasStore((s) => s.hoveredMarker)
@@ -37,12 +35,7 @@ export default function HoverLabel() {
         >
           <div className="glass rounded-lg px-3 py-2 flex items-center gap-2 max-w-sm">
             <div
-              className="w-2 h-2 rounded-full shrink-0"
-              style={{
-                backgroundColor: hoveredMarker._isEvent
-                  ? (DIMENSION_COLORS[hoveredMarker.dimension] || '#fff')
-                  : (CATEGORIES[hoveredMarker.category]?.color || '#fff'),
-              }}
+              className="w-2 h-2 rounded-full shrink-0 bg-white/55"
             />
             <span className="text-xs text-white truncate">{hoveredMarker.title}</span>
             <span className="text-[10px] text-[var(--text-muted)] font-mono shrink-0">

@@ -1,9 +1,9 @@
 import { useMemo } from 'react'
 import { useAtlasStore } from '../../store/atlasStore'
-import { DIMENSION_COLORS, DIMENSION_LABELS, DIMENSION_ICONS } from '../../core/eventSchema'
 
 const RADIUS_KM = 500
 const TIME_WINDOW_MS = 7 * 24 * 3600_000 // ±7 days
+const SIGNAL_COLOR = '#1a90ff'
 
 function haversineKm(lat1, lng1, lat2, lng2) {
   const R = 6371
@@ -30,9 +30,8 @@ function timeAgo(dateStr) {
 /**
  * CausalThread — "Related Signals" section of the event panel.
  *
- * Given a selected event, queries the event store for events in the
- * same region (within ~500 km) and overlapping time window (±7 days)
- * but in different dimensions. Displays as a compact timeline.
+ * Nearby events in an overlapping time window (±7 days, ~500 km).
+ * No dimension taxonomy — relevance is spatial/temporal only.
  */
 export default function CausalThread({ event }) {
   const events = useAtlasStore((s) => s.events)
@@ -46,18 +45,14 @@ export default function CausalThread({ event }) {
     return events
       .filter((e) => {
         if (e.id === event.id) return false
-        // Different dimension
-        if (e.dimension === event.dimension) return false
-        // Within time window
         const eTime = new Date(e.timestamp).getTime()
         if (Math.abs(eTime - eventTime) > TIME_WINDOW_MS) return false
-        // Within radius
         const dist = haversineKm(event.lat, event.lng, e.lat, e.lng)
         if (dist > RADIUS_KM) return false
         return true
       })
       .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
-      .slice(0, 6) // cap at 6 related signals
+      .slice(0, 6)
   }, [event, events])
 
   if (!event) return null
@@ -83,19 +78,13 @@ export default function CausalThread({ event }) {
               <div className="causal-thread-connector">
                 <div
                   className="causal-thread-dot"
-                  style={{ backgroundColor: DIMENSION_COLORS[signal.dimension] }}
+                  style={{ backgroundColor: SIGNAL_COLOR }}
                 />
                 {index < relatedSignals.length - 1 && (
                   <div className="causal-thread-line" />
                 )}
               </div>
               <div className="causal-thread-content">
-                <span
-                  className="causal-thread-dim"
-                  style={{ color: DIMENSION_COLORS[signal.dimension] }}
-                >
-                  {DIMENSION_ICONS[signal.dimension]} {DIMENSION_LABELS[signal.dimension]}
-                </span>
                 <span className="causal-thread-title">
                   {signal.title}
                 </span>

@@ -4,7 +4,6 @@
  */
 import {
   DIMENSION_LABELS,
-  PRIORITY_LABELS,
   formatToneScore,
 } from './eventSchema.js'
 import { defaultTemplateForIndustry } from './investigationSchema.js'

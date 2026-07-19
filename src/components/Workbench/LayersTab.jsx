@@ -1,7 +1,32 @@
 /**
- * Workbench — Layers tab with reference/derived groups and visual grammar legend.
+ * Workbench — Layers tab, grouped by analyst intent (platform plan Workstream C):
+ * Alerts / Live movement / Conditions / Earth observation / Context.
  */
 import { useMemo, useState } from 'react'
+import {
+  Flame,
+  Activity,
+  Waves,
+  Satellite,
+  Wind,
+  Plane,
+  Ship,
+  Radiation,
+  Anchor,
+  Diamond,
+  Map as MapIcon,
+  Cloud,
+  Moon,
+  SunDim,
+  Thermometer,
+  Swords,
+  CircleDot,
+  Tornado,
+  ChevronDown,
+  ChevronRight,
+  KeyRound,
+  Cctv,
+} from 'lucide-react'
 import { useAtlasStore } from '../../store/atlasStore'
 import { GIBS_IMAGERY_LAYERS } from '../../config/gibsBasemap'
 import {
@@ -22,38 +47,73 @@ const HEALTH_COLORS = {
 }
 
 const LAYER_META = {
-  gdeltSignals: { icon: '⚔', desc: 'High-confidence CAMEO events (multi-source or high severity)' },
-  firms: { icon: '🔥', desc: 'Active fire & thermal anomaly data' },
-  usgs: { icon: '🌋', desc: 'Real-time seismic activity worldwide' },
-  gdacs: { icon: '🌊', desc: 'Global disaster alerts & coordination' },
-  eonet: { icon: '🛰', desc: 'Earth Observatory natural events' },
-  nhcStorms: { icon: '🌀', desc: 'NOAA NHC active cyclone forecast tracks + cone-of-error ($0)' },
-  gdeltChoropleth: { icon: '🗺', desc: 'Per-country tone choropleth from CAMEO aggregates' },
-  gdeltHeatmap: { icon: '🌡', desc: 'Event density heatmap from GDELT GEO PointHeatmap' },
-  windOverlay: { icon: '💨', desc: 'Animated wind field from Open-Meteo grid ($0)' },
-  adsb: { icon: '✈', desc: 'Live aircraft from adsb.lol ($0, OpenSky fallback)' },
-  adsbMilitary: { icon: '🛩', desc: 'Military ICAO hex filter — distinct orange sprites' },
-  satellites: { icon: '🛰', desc: 'CelesTrak TLE catalog propagated client-side' },
-  ais: { icon: '🚢', desc: 'Live ships at maritime chokepoints via AISStream.io ($0, API key required)' },
-  referenceNuclear: { icon: '☢', desc: 'Static nuclear facility context — not live events' },
-  referenceChokepoints: { icon: '⚓', desc: 'Maritime chokepoint reference anchors' },
-  derivedSignals: { icon: '◆', desc: 'Synthesized cross-feed anomalies (opt-in)' },
-  gibsTrueColor: { icon: '🛰', desc: GIBS_IMAGERY_LAYERS.gibsTrueColor?.desc },
-  gibsFires: { icon: '🔥', desc: GIBS_IMAGERY_LAYERS.gibsFires?.desc },
-  gibsAerosol: { icon: '🛰', desc: GIBS_IMAGERY_LAYERS.gibsAerosol?.desc },
-  gibsDust: { icon: '🛰', desc: GIBS_IMAGERY_LAYERS.gibsDust?.desc },
-  gibsClouds: { icon: '☁', desc: GIBS_IMAGERY_LAYERS.gibsClouds?.desc },
-  gibsBlackMarble: { icon: '🌃', desc: 'Boost night-side city lights (pairs with terminator)' },
-  terminator: { icon: '◐', desc: 'Live solar terminator line (client-side)' },
+  gdeltSignals: { icon: Swords, desc: 'High-confidence CAMEO events (multi-source or high severity)' },
+  conflictEvents: { icon: Swords, desc: 'UCDP / ACLED conflict event pins' },
+  firms: { icon: Flame, desc: 'Active fire & thermal anomaly data' },
+  usgs: { icon: Activity, desc: 'Real-time seismic activity worldwide' },
+  gdacs: { icon: Waves, desc: 'Global disaster alerts & coordination' },
+  eonet: { icon: Satellite, desc: 'Earth Observatory natural events' },
+  nhcStorms: { icon: Tornado, desc: 'NOAA NHC active cyclone forecast tracks + cone-of-error ($0)' },
+  gdeltChoropleth: { icon: MapIcon, desc: 'Per-country tone choropleth from CAMEO aggregates' },
+  gdeltHeatmap: { icon: Thermometer, desc: 'Event density heatmap from GDELT GEO PointHeatmap' },
+  windOverlay: { icon: Wind, desc: 'Animated wind field from Open-Meteo grid ($0)' },
+  adsb: { icon: Plane, desc: 'Live aircraft from adsb.lol ($0, OpenSky fallback)' },
+  adsbMilitary: { icon: Plane, desc: 'Military ICAO hex filter — distinct orange sprites' },
+  satellites: { icon: Satellite, desc: 'CelesTrak TLE catalog propagated client-side' },
+  ais: { icon: Ship, desc: 'Live ships at maritime chokepoints via AISStream.io ($0, API key required)' },
+  cameras: { icon: Cctv, desc: 'Public webcams & CCTV — Windy (global, key) + TfL London + Caltrans CA' },
+  referenceNuclear: { icon: Radiation, desc: 'Static nuclear facility context — not live events' },
+  referenceChokepoints: { icon: Anchor, desc: 'Maritime chokepoint reference anchors' },
+  derivedSignals: { icon: Diamond, desc: 'Synthesized cross-feed anomalies (opt-in)' },
+  gibsTrueColor: { icon: Satellite, desc: GIBS_IMAGERY_LAYERS.gibsTrueColor?.desc },
+  gibsFires: { icon: Flame, desc: GIBS_IMAGERY_LAYERS.gibsFires?.desc },
+  gibsAerosol: { icon: Satellite, desc: GIBS_IMAGERY_LAYERS.gibsAerosol?.desc },
+  gibsDust: { icon: Wind, desc: GIBS_IMAGERY_LAYERS.gibsDust?.desc },
+  gibsClouds: { icon: Cloud, desc: GIBS_IMAGERY_LAYERS.gibsClouds?.desc },
+  gibsBlackMarble: { icon: Moon, desc: 'Boost night-side city lights (pairs with terminator)' },
+  terminator: { icon: SunDim, desc: 'Live solar terminator line (client-side)' },
 }
 
-const GROUPS = [
-  { kind: 'event', label: 'Event Layers', hint: 'Discrete pins, clustered — authoritative feeds + high-confidence CAMEO' },
-  { kind: 'field', label: 'Field Layers', hint: 'Aggregate surfaces — overlay legend appears on globe when active' },
-  { kind: 'track', label: 'Track Layers', hint: 'Ambient live entities — aircraft, vessels, satellites' },
-  { kind: 'reference', label: 'Reference Layers', hint: 'Static context — hollow ring markers, no pulse or corroboration' },
-  { kind: 'derived', label: 'Derived Layers', hint: 'Synthesized signals from triage anomalies — amber diamond badges' },
-  { kind: 'basemap', label: 'Basemap', hint: 'Imagery & context overlays' },
+/**
+ * Analyst-intent grouping (Workstream C). Explicit membership first;
+ * unlisted layers fall back by catalog kind so new layers never vanish.
+ */
+const INTENT_GROUPS = [
+  {
+    id: 'alerts',
+    label: 'Alerts',
+    hint: 'Live incidents that demand attention — pins sized by severity',
+    keys: ['usgs', 'gdacs', 'eonet', 'firms', 'nhcStorms', 'gdeltSignals', 'conflictEvents'],
+    fallbackKinds: ['event'],
+  },
+  {
+    id: 'movement',
+    label: 'Live movement',
+    hint: 'Ambient tracked entities — aircraft, vessels, satellites',
+    keys: ['adsb', 'adsbMilitary', 'ais', 'satellites', 'cameras'],
+    fallbackKinds: ['track'],
+  },
+  {
+    id: 'conditions',
+    label: 'Conditions',
+    hint: 'Aggregate surfaces — tone, density, weather fields',
+    keys: ['gdeltChoropleth', 'gdeltHeatmap', 'windOverlay', 'terminator'],
+    fallbackKinds: ['field'],
+  },
+  {
+    id: 'earthobs',
+    label: 'Earth observation',
+    hint: 'Satellite imagery & basemap overlays',
+    keys: ['gibsTrueColor', 'gibsFires', 'gibsAerosol', 'gibsDust', 'gibsClouds', 'gibsBlackMarble'],
+    fallbackKinds: ['basemap'],
+  },
+  {
+    id: 'context',
+    label: 'Context & synthesis',
+    hint: 'Static reference anchors + derived cross-feed signals',
+    keys: ['referenceNuclear', 'referenceChokepoints', 'derivedSignals'],
+    fallbackKinds: ['reference', 'derived'],
+  },
 ]
 
 const GRAMMAR_ROWS = [
@@ -82,9 +142,12 @@ function LayerStatusChip({ layerKey, healthCtx }) {
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 3,
       }}
     >
-      {health.tone === 'warn' && cfg?.apiKeyEnv ? '🔑 ' : ''}
+      {health.tone === 'warn' && cfg?.apiKeyEnv ? <KeyRound size={9} /> : null}
       {health.message}
     </span>
   )
@@ -101,7 +164,9 @@ function VisualGrammarLegend() {
         aria-expanded={open}
       >
         <span className="settings-section-label" style={{ margin: 0 }}>Visual Grammar</span>
-        <span className="atlas-grammar-chevron">{open ? '▾' : '▸'}</span>
+        <span className="atlas-grammar-chevron">
+          {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+        </span>
       </button>
       {open && (
         <div className="atlas-grammar-rows">
@@ -139,25 +204,41 @@ export default function LayersTab() {
     gdeltCountryAggregates,
   }
 
-  const grouped = useMemo(
-    () => GROUPS.map((group) => ({
-      ...group,
-      layers: Object.entries(LAYER_CATALOG)
-        .filter(([key, cfg]) => cfg.kind === group.kind && layerAppliesToMode(key, globeMode))
-        .map(([key, cfg]) => ({ key, cfg, meta: LAYER_META[key] || {} })),
-    })).filter((g) => g.layers.length > 0),
-    [globeMode],
-  )
+  const grouped = useMemo(() => {
+    const available = Object.entries(LAYER_CATALOG)
+      .filter(([key]) => layerAppliesToMode(key, globeMode))
+    const claimed = new Set()
+
+    return INTENT_GROUPS.map((group) => {
+      const layers = []
+      for (const key of group.keys) {
+        const cfg = LAYER_CATALOG[key]
+        if (cfg && available.some(([k]) => k === key)) {
+          layers.push({ key, cfg, meta: LAYER_META[key] || {} })
+          claimed.add(key)
+        }
+      }
+      // Fallback by catalog kind for layers not explicitly listed
+      for (const [key, cfg] of available) {
+        if (!claimed.has(key) && group.fallbackKinds.includes(cfg.kind)) {
+          layers.push({ key, cfg, meta: LAYER_META[key] || {} })
+          claimed.add(key)
+        }
+      }
+      return { ...group, layers }
+    }).filter((g) => g.layers.length > 0)
+  }, [globeMode])
 
   return (
     <div style={{ padding: '4px 16px 16px' }}>
       <VisualGrammarLegend />
       {grouped.map((group) => (
-        <div key={group.kind} className="settings-section">
+        <div key={group.id} className="settings-section">
           <div className="settings-section-label">{group.label}</div>
           <div className="settings-toggles">
             {group.layers.map(({ key, cfg, meta }) => {
               const isOn = cfg.optIn ? dataLayers[key] === true : dataLayers[key] !== false
+              const Icon = meta.icon || CircleDot
               return (
                 <button
                   key={key}
@@ -165,7 +246,9 @@ export default function LayersTab() {
                   className={`settings-feature-row ${isOn ? 'on' : 'off'}`}
                   title={meta.desc}
                 >
-                  <span className="settings-feature-icon">{meta.icon || '◌'}</span>
+                  <span className="settings-feature-icon" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    <Icon size={12} />
+                  </span>
                   <span className="settings-feature-label">{cfg.label}</span>
                   <LayerStatusChip layerKey={key} healthCtx={healthCtx} />
                   <span className={`settings-feature-switch ${isOn ? 'on' : ''}`}>
@@ -179,7 +262,7 @@ export default function LayersTab() {
         </div>
       ))}
       <div className="settings-hint" style={{ padding: '0 2px' }}>
-        Layers shown for {modeLabel}. 🔑 = key needed · FIRMS: VITE_FIRMS_MAP_KEY · AIS: AISSTREAM_API_KEY
+        Layers shown for {modeLabel}. Key icon = API key needed · FIRMS: VITE_FIRMS_MAP_KEY · AIS: AISSTREAM_API_KEY
       </div>
     </div>
   )

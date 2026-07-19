@@ -2,15 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAtlasStore } from '../../store/atlasStore'
 import { loadCountryIndex } from '../../services/countryIndex'
-import { DIMENSIONS, DIMENSION_LABELS } from '../../core/eventSchema'
+import { DIMENSIONS } from '../../core/eventSchema'
 
-const PRIORITY_OPTIONS = [
-  { value: 'p1', label: 'Breaking only' },
-  { value: 'p1p2', label: 'Breaking + Active' },
-  { value: 'all', label: 'Full picture' },
-]
-
-const DEFAULT_DIMENSIONS = Object.values(DIMENSIONS)
+const ALL_DIMENSIONS = Object.values(DIMENSIONS)
 
 export default function CreateWorkspaceModal({ open, onClose }) {
   const createWorkspace = useAtlasStore((s) => s.createWorkspace)
@@ -19,9 +13,7 @@ export default function CreateWorkspaceModal({ open, onClose }) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [keywordsRaw, setKeywordsRaw] = useState('')
-  const [priorityFilter, setPriorityFilter] = useState('p1p2')
   const [selectedRegions, setSelectedRegions] = useState([])
-  const [selectedDims, setSelectedDims] = useState(new Set(DEFAULT_DIMENSIONS))
   const [countryIndex, setCountryIndex] = useState([])
   const [countryQuery, setCountryQuery] = useState('')
   const [saving, setSaving] = useState(false)
@@ -45,22 +37,11 @@ export default function CreateWorkspaceModal({ open, onClose }) {
     )
   }
 
-  const toggleDim = (dim) => {
-    setSelectedDims((prev) => {
-      const next = new Set(prev)
-      if (next.has(dim)) next.delete(dim)
-      else next.add(dim)
-      return next
-    })
-  }
-
   const reset = () => {
     setName('')
     setDescription('')
     setKeywordsRaw('')
-    setPriorityFilter('p1p2')
     setSelectedRegions([])
-    setSelectedDims(new Set(DEFAULT_DIMENSIONS))
     setCountryQuery('')
   }
 
@@ -74,8 +55,7 @@ export default function CreateWorkspaceModal({ open, onClose }) {
       description,
       focus_regions: selectedRegions,
       keywords,
-      active_dimensions: [...selectedDims],
-      priority_filter: priorityFilter,
+      active_dimensions: [...ALL_DIMENSIONS],
     })
     setSaving(false)
     if (created) {
@@ -168,30 +148,6 @@ export default function CreateWorkspaceModal({ open, onClose }) {
                 />
               </label>
 
-              <div className="ws-field">
-                <span>Dimensions</span>
-                <div className="ws-dim-grid">
-                  {DEFAULT_DIMENSIONS.map((dim) => (
-                    <button
-                      key={dim}
-                      type="button"
-                      className={`ws-dim-chip ${selectedDims.has(dim) ? 'is-selected' : ''}`}
-                      onClick={() => toggleDim(dim)}
-                    >
-                      {DIMENSION_LABELS[dim]}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <label className="ws-field">
-                <span>Priority filter</span>
-                <select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)}>
-                  {PRIORITY_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </select>
-              </label>
             </div>
 
             <footer className="ws-modal__footer">

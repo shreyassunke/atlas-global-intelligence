@@ -62,7 +62,7 @@ export function blueprintToStixBundle(blueprint) {
         pattern: "[x-atlas:source = '" + (row.source || 'unknown').replace(/'/g, "\\'") + "']",
         pattern_type: 'stix',
         valid_from: row.timestamp || now,
-        labels: [row.priority || 'p2', row.dimension || 'narrative'].filter(Boolean),
+        labels: [row.dimension || 'narrative'].filter(Boolean),
         external_references: row.sourceUrl ? [{
           source_name: row.source || 'source',
           url: row.sourceUrl,

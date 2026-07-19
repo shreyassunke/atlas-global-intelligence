@@ -1,10 +1,9 @@
 /**
  * globe-core/viewModels — renderer-agnostic marker view-models.
  *
- * Archetype grammar (pin / track / field / reference / derived) is orthogonal
- * to dimension color and hazard shape. Renderers consume VMs only.
+ * Archetype grammar (pin / track / field / reference / derived). Pins use a
+ * single signal color — dimension taxonomy is not user-facing.
  */
-import { DIMENSION_COLORS } from '../core/eventSchema'
 import {
   getAnimationState,
   getSeveritySize,
@@ -58,8 +57,11 @@ export function rgbaFromHex(hex, alpha) {
   return `rgba(${r},${g},${b},${alpha})`
 }
 
-export function eventMarkerColor(evt) {
-  return DIMENSION_COLORS[evt.dimension] || '#1a90ff'
+/** Shared pin color — unlabeled signal, not a taxonomy swatch. */
+export const SIGNAL_MARKER_COLOR = '#1a90ff'
+
+export function eventMarkerColor(_evt) {
+  return SIGNAL_MARKER_COLOR
 }
 
 export function eventMarkerRadiusGl(evt) {

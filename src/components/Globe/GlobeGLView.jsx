@@ -32,8 +32,10 @@ import {
     useGlobeViewModels,
     applyMarkerClick,
     applyMarkerHover,
-    applyCountryClick,
+    applyCursorCoords,
+    clearCursorCoords,
     applyGlobeMapClick,
+    applyGlobeMapContextMenu,
     resolveFlyToTarget,
     markerRingMaxRadius,
     isSpriteArchetype,
@@ -515,17 +517,60 @@ export default function GlobeGLView({ onGlobeReady }) {
                 el.style.opacity = isVisible ? (el.dataset.baseOpacity || '1') : '0'
             })
 
-        // Track mouse position on the container for hover tooltip coords
+        // Track mouse position for hover tooltips + live lat/lng HUD
         const onPointerMove = (e) => {
             container._lastPointerX = e.clientX
             container._lastPointerY = e.clientY
+            const rect = container.getBoundingClientRect()
+            try {
+                const geo = globe.toGeoCoords?.({
+                    x: e.clientX - rect.left,
+                    y: e.clientY - rect.top,
+                })
+                if (Number.isFinite(geo?.lat) && Number.isFinite(geo?.lng)) {
+                    applyCursorCoords(geo.lat, geo.lng)
+                } else {
+                    clearCursorCoords()
+                }
+            } catch {
+                clearCursorCoords()
+            }
         }
+        const onPointerLeave = () => clearCursorCoords()
         container.addEventListener('pointermove', onPointerMove)
+        container.addEventListener('pointerleave', onPointerLeave)
 
-        // ── Globe background click — country pick or dismiss selection ──
+        // ── Globe background click — dismiss selection / Street View ──
         globe.onGlobeClick(({ lat, lng }) => {
             applyGlobeMapClick({ lat, lng })
         })
+
+        // ── Right-click country context menu (capture: avoid child swallow) ──
+        const onContextMenu = (e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            const rect = container.getBoundingClientRect()
+            let lat
+            let lng
+            try {
+                const geo = globe.toGeoCoords?.({
+                    x: e.clientX - rect.left,
+                    y: e.clientY - rect.top,
+                })
+                lat = geo?.lat
+                lng = geo?.lng
+            } catch {
+                /* toGeoCoords unavailable */
+            }
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) return
+            applyGlobeMapContextMenu({
+                lat,
+                lng,
+                screenX: e.clientX,
+                screenY: e.clientY,
+            })
+        }
+        container.addEventListener('contextmenu', onContextMenu, true)
 
         // ── Rings layer ──
         globe
@@ -580,12 +625,8 @@ export default function GlobeGLView({ onGlobeReady }) {
             .polygonSideColor(() => 'rgba(0, 0, 0, 0.08)')
             .polygonStrokeColor(() => 'rgba(255,255,255,0.22)')
             .polygonsTransitionDuration(600)
-            // Choropleth country → Dossier (storm cones carry no __fips/name)
-            .onPolygonClick((d) => {
-                if (d?.__fips || (d?.name && !d?.__id?.startsWith('storm-cone-'))) {
-                    applyCountryClick({ fips: d.__fips, iso: d.iso, name: d.name })
-                }
-            })
+            // Storm cones remain non-interactive; country investigation is via right-click menu
+            .onPolygonClick(() => {})
 
         globe
             .pathsData([])
@@ -647,7 +688,10 @@ export default function GlobeGLView({ onGlobeReady }) {
             container.removeEventListener('pointerdown', stopRotate)
             container.removeEventListener('wheel', stopRotate)
             container.removeEventListener('pointermove', onPointerMove)
+            container.removeEventListener('pointerleave', onPointerLeave)
+            container.removeEventListener('contextmenu', onContextMenu, true)
             applyMarkerHover(null)
+            clearCursorCoords()
             clearTimeout(idleTimerRef.current)
             clearTimeout(readyTimer)
             if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)

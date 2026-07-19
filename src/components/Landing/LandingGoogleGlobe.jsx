@@ -28,7 +28,10 @@ const RANGE_INTRO_FROM_M = 34_000_000
 const RANGE_INTRO_TO_M = 18_200_000
 const LANDING_TILT = 46
 const INTRO_MS = 2600
-const IDLE_RESUME_MS = 6500
+/** Brief settle after pointer-up so Map3D inertia can finish before spin resumes */
+const RESUME_AFTER_RELEASE_MS = 450
+/** Degrees per animation frame while idle-spinning */
+const SPIN_DEG_PER_FRAME = 0.09
 const MARKER_ALT_M = 1400
 const MARKER_PX = 22
 
@@ -102,8 +105,12 @@ function InnerLandingMap() {
   const [selected, setSelected] = useState(null)
   const readyRef = useRef(false)
   const introStartedRef = useRef(false)
+  const introDoneRef = useRef(false)
   const idleTimerRef = useRef(null)
-  const idleSpinGateRef = useRef(true)
+  /** False until intro finishes; then true while idle, false while user is dragging */
+  const idleSpinGateRef = useRef(false)
+  const userGesturingRef = useRef(false)
+  const activePointersRef = useRef(0)
   const spinRafRef = useRef(null)
   const reduceMotion =
     typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -118,26 +125,28 @@ function InnerLandingMap() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const resetIdleSpin = useCallback(() => {
-    if (reduceMotion) return
+  const pauseSpin = useCallback(() => {
     idleSpinGateRef.current = false
     clearTimeout(idleTimerRef.current)
+  }, [])
+
+  const resumeSpinSoon = useCallback(() => {
+    if (reduceMotion || !introDoneRef.current) return
+    clearTimeout(idleTimerRef.current)
     idleTimerRef.current = setTimeout(() => {
-      idleSpinGateRef.current = true
-    }, IDLE_RESUME_MS)
+      if (!userGesturingRef.current) idleSpinGateRef.current = true
+    }, RESUME_AFTER_RELEASE_MS)
   }, [reduceMotion])
 
-  const handleCameraChanged = useCallback(
-    (ev) => {
-      const d = ev.detail
-      if (d.center) cameraRef.current.center = d.center
-      if (typeof d.range === 'number') cameraRef.current.range = d.range
-      if (typeof d.heading === 'number') cameraRef.current.heading = d.heading
-      if (typeof d.tilt === 'number') cameraRef.current.tilt = d.tilt
-      resetIdleSpin()
-    },
-    [resetIdleSpin],
-  )
+  const handleCameraChanged = useCallback((ev) => {
+    const d = ev.detail
+    if (d.center) cameraRef.current.center = d.center
+    if (typeof d.range === 'number') cameraRef.current.range = d.range
+    if (typeof d.heading === 'number') cameraRef.current.heading = d.heading
+    if (typeof d.tilt === 'number') cameraRef.current.tilt = d.tilt
+    // Do not pause spin here — our own heading writes fire camera events and would
+    // immediately cancel auto-rotate. Gestures pause via pointer/wheel handlers.
+  }, [])
 
   const flyToMarker = useCallback((lat, lng) => {
     const map = map3dRef.current
@@ -166,17 +175,41 @@ function InnerLandingMap() {
       e?.preventDefault?.()
       setSelected(m)
       flyToMarker(m.lat, m.lng)
-      resetIdleSpin()
+      pauseSpin()
+      resumeSpinSoon()
     },
-    [flyToMarker, resetIdleSpin],
+    [flyToMarker, pauseSpin, resumeSpinSoon],
   )
 
+  const enableIdleSpin = useCallback(() => {
+    introDoneRef.current = true
+    if (reduceMotion || userGesturingRef.current) return
+    idleSpinGateRef.current = true
+  }, [reduceMotion])
+
   const runIntro = useCallback(() => {
-    if (introStartedRef.current || reduceMotion) return
+    if (introStartedRef.current) return
     const map = map3dRef.current
     if (!map?.flyCameraTo) return
     introStartedRef.current = true
     const center = viewCenter
+
+    if (reduceMotion) {
+      map.flyCameraTo({
+        endCamera: {
+          center,
+          range: RANGE_INTRO_TO_M,
+          heading: 0,
+          tilt: LANDING_TILT,
+          roll: 0,
+        },
+        durationMillis: 0,
+      })
+      enableIdleSpin()
+      return
+    }
+
+    pauseSpin()
     map.flyCameraTo({
       endCamera: {
         center,
@@ -199,13 +232,16 @@ function InnerLandingMap() {
         durationMillis: INTRO_MS,
       })
     })
-  }, [reduceMotion, viewCenter])
+    clearTimeout(idleTimerRef.current)
+    idleTimerRef.current = setTimeout(enableIdleSpin, INTRO_MS + 120)
+  }, [enableIdleSpin, pauseSpin, reduceMotion, viewCenter])
 
   const finalizeReady = useCallback(() => {
     if (readyRef.current) return
     readyRef.current = true
     if (map3dRef.current?.flyCameraTo) runIntro()
-  }, [runIntro])
+    else enableIdleSpin()
+  }, [enableIdleSpin, runIntro])
 
   const onFirstSteady = useCallback(
     (ev) => {
@@ -223,10 +259,14 @@ function InnerLandingMap() {
   useEffect(() => {
     if (reduceMotion) return
     const spin = () => {
-      if (idleSpinGateRef.current && map3dRef.current?.map3d) {
+      if (
+        idleSpinGateRef.current &&
+        !userGesturingRef.current &&
+        map3dRef.current?.map3d
+      ) {
         const el = map3dRef.current.map3d
         const h = Number(el.heading) || 0
-        el.heading = (h + 0.06) % 360
+        el.heading = (h + SPIN_DEG_PER_FRAME) % 360
       }
       spinRafRef.current = requestAnimationFrame(spin)
     }
@@ -240,9 +280,46 @@ function InnerLandingMap() {
   return (
     <div
       className="absolute inset-0 z-0"
-      style={{ cursor: 'grab' }}
-      onPointerDown={resetIdleSpin}
-      onWheel={resetIdleSpin}
+      style={{ cursor: 'grab', touchAction: 'none' }}
+      onPointerDown={(e) => {
+        activePointersRef.current += 1
+        userGesturingRef.current = true
+        pauseSpin()
+        e.currentTarget.style.cursor = 'grabbing'
+      }}
+      onPointerUp={(e) => {
+        activePointersRef.current = Math.max(0, activePointersRef.current - 1)
+        if (activePointersRef.current === 0) {
+          userGesturingRef.current = false
+          e.currentTarget.style.cursor = 'grab'
+          resumeSpinSoon()
+        }
+      }}
+      onPointerCancel={(e) => {
+        activePointersRef.current = Math.max(0, activePointersRef.current - 1)
+        if (activePointersRef.current === 0) {
+          userGesturingRef.current = false
+          e.currentTarget.style.cursor = 'grab'
+          resumeSpinSoon()
+        }
+      }}
+      onPointerLeave={() => {
+        // If drag ends outside the element, still resume
+        if (activePointersRef.current > 0) {
+          activePointersRef.current = 0
+          userGesturingRef.current = false
+          resumeSpinSoon()
+        }
+      }}
+      onWheel={() => {
+        userGesturingRef.current = true
+        pauseSpin()
+        clearTimeout(idleTimerRef.current)
+        idleTimerRef.current = setTimeout(() => {
+          userGesturingRef.current = false
+          resumeSpinSoon()
+        }, 400)
+      }}
     >
       <Map3D
         ref={map3dRef}

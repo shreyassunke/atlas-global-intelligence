@@ -12,10 +12,16 @@
  *     title, why, event?, lat?, lng?, isNew, dimension? }
  */
 
-import { DIMENSION_LABELS } from './eventSchema.js'
 
-/** Rows older than this never make the triage list. */
-export const TRIAGE_WINDOW_MS = 24 * 3600_000
+import {
+  ATLAS_CYCLE_MS,
+  eventTimestampMs,
+  isWithinAtlasCycle,
+  pinnedEventIds,
+} from './atlasCycle.js'
+
+/** Rows older than this never make the triage list (ATLAS 24h cycle). */
+export const TRIAGE_WINDOW_MS = ATLAS_CYCLE_MS
 
 /** Mirrors the anomaly grid in eventBus.worker.js (GRID_SIZE = 200). */
 const ANOMALY_GRID_SIZE = 200
@@ -96,12 +102,11 @@ export function confidenceForEvent(event) {
 }
 
 function eventWhy(event) {
-  const dim = DIMENSION_LABELS[event.dimension] || event.dimension || 'Signal'
   const sev = event.severity || 1
   const conf = confidenceForEvent(event)
-  const head = sev >= 5 ? `Critical ${dim.toLowerCase()} event`
-    : sev >= 4 ? `Severe ${dim.toLowerCase()} event`
-      : `${dim} event`
+  const head = sev >= 5 ? 'Critical signal'
+    : sev >= 4 ? 'Severe signal'
+      : 'Signal'
   return `${head} — ${conf.label.toLowerCase()}`
 }
 
@@ -147,11 +152,10 @@ function anomalyRow(anomaly, eventMap, now) {
   switch (anomaly.type) {
     case 'SPIKE': {
       const coords = anomalyCellToLatLng(anomaly.cell)
-      const dim = DIMENSION_LABELS[anomaly.dimension] || anomaly.dimension || 'signal'
       return {
         ...base,
         ...(coords || {}),
-        title: `${dim} activity spike`,
+        title: 'Activity spike',
         why: `${anomaly.count} signals in 6h vs ~${anomaly.expected} expected — local surge above the 7-day baseline`,
       }
     }
@@ -186,7 +190,7 @@ function anomalyRow(anomaly, eventMap, now) {
       return {
         ...base,
         title: evt?.title || 'Rapid escalation',
-        why: `Jumped ${String(anomaly.from).toUpperCase()} → ${String(anomaly.to).toUpperCase()} in under 10 minutes`,
+        why: `Severity jumped rapidly in under 10 minutes`,
       }
     default:
       return null
@@ -202,13 +206,6 @@ function corroborationRow(anomaly, eventMap) {
       kind: 'corroboration',
       severity: anomaly.newSeverity || evt.severity,
       why: `Now corroborated by ${n} independent feeds — severity upgraded to ${anomaly.newSeverity}/5`,
-    })
-  }
-  if (anomaly.type === 'PRIORITY_UPGRADE' || anomaly.type === 'TIER_UPGRADE') {
-    if (!evt) return null
-    return eventRow(evt, {
-      kind: 'corroboration',
-      why: `Upgraded ${String(anomaly.from).toUpperCase()} → ${String(anomaly.to).toUpperCase()} after a cross-source merge`,
     })
   }
   return null
@@ -233,9 +230,9 @@ function surgeRow(alert) {
 }
 
 /**
- * Build the ranked triage list. New-since-last-visit P1 rows first, then by
- * severity, then recency. One row per underlying event (corroboration
- * upgrades win over plain P1 rows since they carry the better story).
+ * Build the ranked triage list. New-since-last-visit high-severity rows first,
+ * then by severity, then recency. One row per underlying event (corroboration
+ * upgrades win over plain high-severity rows since they carry the better story).
  */
 export function buildTriageRows({
   events = [],
@@ -244,14 +241,17 @@ export function buildTriageRows({
   surgeAlerts = [],
   lastSeenAt = 0,
   now = Date.now(),
+  investigation = null,
 } = {}) {
   const cutoff = now - TRIAGE_WINDOW_MS
   const rows = []
   const seenEventIds = new Set()
+  const pinned = pinnedEventIds(investigation)
 
   const push = (row) => {
     if (!row) return
     if (row.event) {
+      if (pinned.has(row.event.id)) return
       if (seenEventIds.has(row.event.id)) return
       seenEventIds.add(row.event.id)
     }
@@ -265,18 +265,22 @@ export function buildTriageRows({
     push(corroborationRow(a, eventMap))
   }
 
-  // 2. New P1 events since the analyst last looked (plus recent P1 context).
+  // 2. High-severity events in the 24h cycle (publication time, not re-fetch).
   for (const e of events) {
-    if (e.priority !== 'p1') continue
-    const seenTs = tsMs(e.fetchedAt, tsMs(e.timestamp))
-    if (tsMs(e.timestamp, seenTs) < cutoff && seenTs < cutoff) continue
-    push(eventRow(e, { kind: 'p1', isNew: seenTs > lastSeenAt }))
+    if ((e.severity || 1) < 4) continue
+    if (pinned.has(e.id)) continue
+    if (!isWithinAtlasCycle(e, now)) continue
+    const pubTs = eventTimestampMs(e)
+    if (pubTs < cutoff) continue
+    const seenTs = tsMs(e.fetchedAt, pubTs)
+    push(eventRow(e, { kind: 'high-severity', isNew: seenTs > lastSeenAt }))
   }
 
-  // 3. Tone-disagreement flags on anything still live.
+  // 3. Tone-disagreement flags on anything still in the 24h cycle.
   for (const e of events) {
     if (!e.toneDisagreement) continue
-    if (tsMs(e.timestamp, now) < cutoff) continue
+    if (pinned.has(e.id)) continue
+    if (!isWithinAtlasCycle(e, now)) continue
     const spread = e.toneDisagreement.spread
     push(eventRow(e, {
       kind: 'dispute',
@@ -286,7 +290,7 @@ export function buildTriageRows({
 
   // 4. Structural anomalies (spikes, blackouts, composites).
   for (const a of recentAnomalies) {
-    if (a.type === 'CORROBORATION_BOOST' || a.type === 'PRIORITY_UPGRADE' || a.type === 'TIER_UPGRADE') continue
+    if (a.type === 'CORROBORATION_BOOST') continue
     push(anomalyRow(a, eventMap, now))
   }
 
@@ -303,13 +307,16 @@ export function buildTriageRows({
   return rows
 }
 
-/** Header badge: P1 events that landed after the analyst's last triage visit. */
-export function countUnseenP1(events, lastSeenAt) {
+/** Header badge: high-severity cycle events that landed after the analyst's last triage visit. */
+export function countUnseenHighSeverity(events, lastSeenAt, now = Date.now(), investigation = null) {
   if (!events?.length) return 0
+  const pinned = pinnedEventIds(investigation)
   let n = 0
   for (const e of events) {
-    if (e.priority !== 'p1') continue
-    if (tsMs(e.fetchedAt, tsMs(e.timestamp)) > lastSeenAt) n++
+    if ((e.severity || 1) < 4) continue
+    if (pinned.has(e.id)) continue
+    if (!isWithinAtlasCycle(e, now)) continue
+    if (tsMs(e.fetchedAt, eventTimestampMs(e)) > lastSeenAt) n++
   }
   return n
 }

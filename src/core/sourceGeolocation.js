@@ -14,6 +14,7 @@ export const SOURCE_GEO_TIER = {
   firms: 'pinpoint',
   opensky: 'pinpoint',
   aisstream: 'pinpoint',
+  cameras: 'pinpoint',
   'noaa-nhc': 'pinpoint',
   safecast: 'pinpoint',
 
@@ -70,6 +71,7 @@ export const GLOBE_LAYER_BY_SOURCE_ID = {
   opensky: 'adsb',
   'celestrak-tle': 'satellites',
   aisstream: 'ais',
+  cameras: 'cameras',
   'noaa-nhc': 'nhcStorms',
 }
 
@@ -86,6 +88,11 @@ const DISPLAY_SOURCE_TO_ID = {
   opensky: 'opensky',
   'opensky network': 'opensky',
   aisstream: 'aisstream',
+  cameras: 'cameras',
+  'live cameras': 'cameras',
+  windy: 'cameras',
+  'tfl jamcams': 'cameras',
+  caltrans: 'cameras',
   'noaa nhc': 'noaa-nhc',
   'celestrak tle': 'celestrak-tle',
 }

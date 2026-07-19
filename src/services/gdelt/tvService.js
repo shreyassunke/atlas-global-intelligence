@@ -42,14 +42,14 @@ function buildTvUrl(query, mode, { timespan = '1440min', dataset = DEFAULT_DATAS
 /** TV TimelineVol — percentage of 15-second clips matching the query per day. */
 export async function fetchTvTimeline(query, { timespan = '1440min', dataset, signal } = {}) {
   const url = buildTvUrl(query, 'timelinevol', { timespan, dataset })
-  const json = await fetchGdeltJson(url, { signal })
+  const json = await fetchGdeltJson(url, { signal, priority: 'interactive' })
   return parseTimelineJson(json)
 }
 
 /** TV StationChart — share of coverage per station. */
 export async function fetchTvStationChart(query, { timespan = '1440min', dataset, signal } = {}) {
   const url = buildTvUrl(query, 'stationchart', { timespan, dataset })
-  const json = await fetchGdeltJson(url, { signal })
+  const json = await fetchGdeltJson(url, { signal, priority: 'interactive' })
   const rows = [json?.stationchart, json?.stationChart, json?.chart, json?.data].find((x) => Array.isArray(x)) || []
   return rows
     .map((row) => {
@@ -69,7 +69,7 @@ export async function fetchTvStationChart(query, { timespan = '1440min', dataset
  */
 export async function fetchTvClips(query, { timespan = '1440min', dataset, maxrecords = 12, station, signal } = {}) {
   const url = buildTvUrl(query, 'clipgallery', { timespan, dataset, maxrecords, station })
-  const json = await fetchGdeltJson(url, { signal })
+  const json = await fetchGdeltJson(url, { signal, priority: 'interactive' })
   const rows = [json?.clips, json?.Clips, json?.results, json?.data].find((x) => Array.isArray(x)) || []
   return rows
     .map((row) => {
@@ -108,7 +108,7 @@ export async function fetchTvAiVisualEntities(query, { timespan = '1440min', max
     timespan,
     maxrecords: Math.max(1, Math.min(100, Number(maxrecords) || 25)),
   })
-  const json = await fetchGdeltJson(url, { signal })
+  const json = await fetchGdeltJson(url, { signal, priority: 'interactive' })
   const rows =
     [json?.entitychart, json?.entityChart, json?.entities, json?.chart, json?.data].find((x) => Array.isArray(x)) || []
   return rows

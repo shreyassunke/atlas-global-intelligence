@@ -22,7 +22,7 @@ export function isWorldZoom(globeMode, zoomLevel) {
 }
 
 /** The monitor surface is calm; aggregates carry density. */
-export const MAX_GLOBE_MARKERS = 400
+export const MAX_GLOBE_MARKERS = 250
 export const MAX_TACTICAL_AIRCRAFT = 500
 export const MAX_TACTICAL_VESSELS = 400
 export const MAX_TACTICAL_SATELLITES = 400

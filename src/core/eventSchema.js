@@ -30,8 +30,18 @@ export const DIMENSION_COLORS = {
   [DIMENSIONS.GOVERNANCE]:  '#7F77DD',   // purple
   [DIMENSIONS.ECONOMY]:     '#EF9F27',   // amber
   [DIMENSIONS.PEOPLE]:      '#1D9E75',   // teal
-  [DIMENSIONS.ENVIRONMENT]: '#888780',   // gray
+  [DIMENSIONS.ENVIRONMENT]: '#7CB342',   // leaf green — was gray, which made the dominant hazard layer read as clutter
   [DIMENSIONS.NARRATIVE]:   '#378ADD',   // blue
+}
+
+/** Hex dimension color → rgba for explicit opacity (avoids color-mix()). */
+export function hexWithAlpha(hex, alpha) {
+  const h = String(hex || '#378ADD').replace('#', '')
+  if (h.length !== 6) return `rgba(55, 138, 221, ${alpha})`
+  const r = parseInt(h.slice(0, 2), 16)
+  const g = parseInt(h.slice(2, 4), 16)
+  const b = parseInt(h.slice(4, 6), 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
 // ── Civilian labels — never expose acronyms or military jargon ──
@@ -101,22 +111,6 @@ export function getRecencyState(timestamp) {
 }
 
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  Priority classification
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Classify an event into P1/P2/P3 priority.
- *   P1 BREAKING: severity >= 4 AND pulsing (< 2h old)
- *   P2 ACTIVE:   severity >= 2 OR not static (< 24h old)
- *   P3 CONTEXT:  everything else
- */
-export function classifyPriority(severity, timestamp) {
-  const recency = getRecencyState(timestamp)
-  if (severity >= 4 && recency === 'pulsing') return PRIORITIES.P1
-  if (severity >= 2 || recency !== 'static') return PRIORITIES.P2
-  return PRIORITIES.P3
-}
 
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -227,7 +221,6 @@ export function createEvent(fields) {
 
   const timestamp = fields.timestamp || new Date().toISOString()
   const severity = Math.max(1, Math.min(5, fields.severity || 1))
-  const priority = fields.priority || classifyPriority(severity, timestamp)
   const dimension = fields.dimension || DIMENSIONS.NARRATIVE
 
   return {
@@ -240,7 +233,6 @@ export function createEvent(fields) {
     ),
     // Civilian taxonomy
     dimension,
-    priority,
     color: DIMENSION_COLORS[dimension] || DIMENSION_COLORS[DIMENSIONS.NARRATIVE],
     // Timing
     timestamp,
@@ -275,11 +267,8 @@ export function createEvent(fields) {
     actor1: fields.actor1 || '',
     actor2: fields.actor2 || '',
     locationName: fields.locationName || '',
-    // Legacy compatibility — components that still read .domain or .tier
+    // Legacy compatibility
     domain: dimension,
-    tier: priority === PRIORITIES.P1 ? 'critical'
-        : priority === PRIORITIES.P2 ? 'active'
-        : 'latent',
   }
 }
 
@@ -303,7 +292,7 @@ export const DOMAINS = {
   HAZARD:        DIMENSIONS.ENVIRONMENT,
 }
 
-/** @deprecated Use PRIORITIES */
+/** @deprecated */
 export const TIERS = {
   LATENT:   'latent',
   ACTIVE:   'active',

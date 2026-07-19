@@ -18,7 +18,6 @@ import {
 import '@xyflow/react/dist/style.css'
 import { useAtlasStore } from '../../store/atlasStore'
 import { suggestCanvasConnections } from '../../core/canvasSuggestions'
-import { DIMENSION_COLORS, DIMENSION_LABELS } from '../../core/eventSchema'
 import { downloadMarkdownBrief } from '../../core/briefExport'
 import { buildReportBlueprint, blueprintToMarkdown } from '../../core/reportBlueprint'
 
@@ -28,13 +27,14 @@ const EDGE_STYLES = {
   correlation: { stroke: '#378ADD', strokeDasharray: '3 3' },
 }
 
+const SIGNAL_COLOR = '#1a90ff'
+
 function EvidenceNode({ data, selected }) {
-  const dimColor = DIMENSION_COLORS[data.dimension] || '#378ADD'
   return (
-    <div className={`canvas-node ${selected ? 'is-selected' : ''}`} style={{ '--node-accent': dimColor }}>
+    <div className={`canvas-node ${selected ? 'is-selected' : ''}`} style={{ '--node-accent': SIGNAL_COLOR }}>
       <Handle type="target" position={Position.Top} className="canvas-handle" />
       <div className="canvas-node__header">
-        <span className="canvas-node__dim" style={{ backgroundColor: dimColor }} />
+        <span className="canvas-node__dim" style={{ backgroundColor: SIGNAL_COLOR }} />
         <span className="canvas-node__kind">{data.kind || 'event'}</span>
       </div>
       <p className="canvas-node__title">{data.title}</p>
@@ -199,7 +199,7 @@ export default function InvestigationCanvas() {
             <Background color="rgba(255,255,255,0.04)" gap={20} />
             <Controls showInteractive={false} className="canvas-controls" />
             <MiniMap
-              nodeColor={(n) => DIMENSION_COLORS[n.data?.dimension] || '#378ADD'}
+              nodeColor={() => SIGNAL_COLOR}
               maskColor="rgba(3,7,18,0.85)"
               className="canvas-minimap"
             />
@@ -230,9 +230,8 @@ export default function InvestigationCanvas() {
           <ul>
             {investigation.evidence.map((ev) => (
               <li key={ev.id}>
-                <span className="canvas-ev__dim" style={{ backgroundColor: DIMENSION_COLORS[ev.dimension] }} />
+                <span className="canvas-ev__dim" style={{ backgroundColor: '#1a90ff' }} />
                 <span className="canvas-ev__title">{ev.title}</span>
-                <span className="canvas-ev__dim-label">{DIMENSION_LABELS[ev.dimension]}</span>
                 <button type="button" className="canvas-ev__remove" onClick={() => removeEvidenceFromCanvas(ev.id)}>
                   Remove
                 </button>

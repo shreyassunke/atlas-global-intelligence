@@ -160,6 +160,7 @@ export function MissionClock() {
   const [search, setSearch] = useState('')
   const rootRef = useRef(null)
   const selectedMarker = useAtlasStore((s) => s.selectedMarker)
+  const cursorCoords = useAtlasStore((s) => s.cursorCoords)
   const mobileMode = useAtlasStore((s) => s.mobileMode)
 
   useEffect(() => {
@@ -209,8 +210,13 @@ export function MissionClock() {
   }, [search])
 
   const coordsLabel = useMemo(() => {
-    let lat = selectedMarker?.lat
-    let lng = selectedMarker?.lng
+    let lat = cursorCoords?.lat
+    let lng = cursorCoords?.lng
+
+    if (lat == null || lng == null) {
+      lat = selectedMarker?.lat
+      lng = selectedMarker?.lng
+    }
 
     if (lat == null || lng == null) {
       const center = getTimezoneViewCenter(timezone)
@@ -222,7 +228,7 @@ export function MissionClock() {
     const latStr = lat.toFixed(2)
     const lngStr = lng.toFixed(2)
     return `Lat ${latStr}°   Lon ${lngStr}°`
-  }, [selectedMarker, timezone])
+  }, [cursorCoords, selectedMarker, timezone])
 
   return (
     <div

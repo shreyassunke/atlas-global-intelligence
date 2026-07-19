@@ -1,5 +1,6 @@
 /**
- * FlatMap — 2D map via MapLibre GL JS. Countries and US states share a uniform dark land fill (no graph coloring).
+ * FlatMap — 2D map via MapLibre GL JS.
+ * Carto Dark Matter greyscale basemap with subtle admin borders (no graph coloring).
  */
 import { useEffect, useRef, useMemo, useState } from 'react'
 import useShareCameraBridge from '../../hooks/useShareCameraBridge'
@@ -13,7 +14,10 @@ import { terminatorGeoJsonLine } from '../../core/solarTerminator'
 import {
   useGlobeViewModels,
   applyMarkerClick,
+  applyCursorCoords,
+  clearCursorCoords,
   applyGlobeMapClick,
+  applyGlobeMapContextMenu,
   resolveFlyToTarget,
 } from '../../globe-core'
 import { showDetectionLabel as getDetectionLabel } from '../../core/detectionLabels'
@@ -35,10 +39,16 @@ function buildDetectionLabelFeatures(events, opts) {
 
 const URL_COUNTRIES =
   'https://d2ad6b4ur7yvpq.cloudfront.net/naturalearth-3.3.0/ne_50m_admin_0_countries.geojson'
-const URL_STATES =
-  'https://d2ad6b4ur7yvpq.cloudfront.net/naturalearth-3.3.0/ne_50m_admin_1_states_provinces_shp.geojson'
 
-/** Carto OSM labels only (countries → cities); tint baked for dark basemaps */
+/** Carto Dark Matter — dark greyscale basemap (no labels; labels layered above admin lines) */
+const BASE_TILES = [
+  'https://a.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}.png',
+  'https://b.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}.png',
+  'https://c.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}.png',
+  'https://d.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}.png',
+]
+
+/** Carto Dark Matter labels only (countries → cities) */
 const BASE_LABEL_TILES = [
   'https://a.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}.png',
   'https://b.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}.png',
@@ -46,11 +56,17 @@ const BASE_LABEL_TILES = [
   'https://d.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}.png',
 ]
 
-/** Navy-tinted canvas; aligns with Carto dark_no_labels oceans when tiles load */
-const OCEAN_BG = '#0a1426'
+/** Match app --bg so the canvas and HUD header read the same as other globe modes */
+const OCEAN_BG = '#030712'
 
-/** Landmass fill — near-ocean charcoal so the map reads as a single dark plot with subtle borders */
-const LAND_FILL = '#0c1628'
+/** Soft charcoal land tint — Dark Matter tiles carry roads/terrain detail */
+const LAND_FILL = '#1a2332'
+const LAND_FILL_OPACITY = 0.28
+const LAND_FILL_OPACITY_GIBS = 0.1
+
+/** Admin borders — cool grey hairlines on dark basemap */
+const BORDER_COLOR = 'rgba(180, 190, 210, 0.42)'
+const BORDER_HALO = 'rgba(3, 7, 18, 0.75)'
 
 const DEFAULT_ZOOM = 2.5
 const MIN_ZOOM = 1.5
@@ -61,17 +77,6 @@ function regionKeyForCountry(feat) {
   const a3 = (p.ADM0_A3 || p.adm0_a3 || '').toString()
   if (!a3 || a3 === 'ATA' || a3 === '-99') return null
   return a3
-}
-
-function regionKeyForState(feat) {
-  const p = feat.properties || {}
-  if ((p.iso_a2 || p.ISO_A2 || '').toString().toUpperCase() !== 'US') return null
-  const abbr = (p.postal || p.POSTAL || '').toString().toUpperCase()
-  if (abbr.length === 2) return `US_${abbr}`
-  const iso2 = (p.iso_3166_2 || p.ISO_3166_2 || '').toString().toUpperCase()
-  const m = iso2.match(/^US-([A-Z]{2})$/i)
-  if (m) return `US_${m[1].toUpperCase()}`
-  return null
 }
 
 /** Marker view-models (globe-core) → MapLibre circle features. */
@@ -152,20 +157,15 @@ export default function FlatMap({ onGlobeReady }) {
     const pr = isMobileDevice() ? 1 : Math.min(typeof window !== 'undefined' ? window.devicePixelRatio : 1, 2)
 
     ;(async () => {
-      const [resC, resS] = await Promise.all([fetch(URL_COUNTRIES), fetch(URL_STATES)])
+      const resC = await fetch(URL_COUNTRIES)
       if (cancelled) return
       if (!resC.ok) throw new Error(`countries ${resC.status}`)
-      if (!resS.ok) throw new Error(`states ${resS.status}`)
 
       const countries = await resC.json()
-      const admin1 = await resS.json()
       if (cancelled) return
 
       const countryFeatures = (countries.features || []).filter((f) => regionKeyForCountry(f) != null)
-      const stateFeatures = (admin1.features || []).filter((f) => regionKeyForState(f) != null)
-
       const landCountriesFc = { type: 'FeatureCollection', features: countryFeatures }
-      const landStatesFc = { type: 'FeatureCollection', features: stateFeatures }
 
       if (cancelled) return
 
@@ -202,11 +202,31 @@ export default function FlatMap({ onGlobeReady }) {
         if (cancelled) return
         map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right')
 
+        map.addSource('basemap', {
+          type: 'raster',
+          tiles: BASE_TILES,
+          tileSize: 256,
+          attribution:
+            '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap</a> © CARTO',
+        })
         map.addSource('countries', { type: 'geojson', data: landCountriesFc })
-        map.addSource('states', { type: 'geojson', data: landStatesFc })
         map.addSource('events', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
         const dl0 = useAtlasStore.getState().dataLayers || {}
         let anyGibs = false
+        for (const key of GIBS_IMAGERY_LAYER_KEYS) {
+          if (dl0[key] === true) anyGibs = true
+        }
+
+        map.addLayer({
+          id: 'basemap',
+          type: 'raster',
+          source: 'basemap',
+          paint: {
+            'raster-opacity': anyGibs ? 0.35 : 1,
+            'raster-fade-duration': 150,
+          },
+        })
+
         for (const key of GIBS_IMAGERY_LAYER_KEYS) {
           const cfg = GIBS_IMAGERY_LAYERS[key]
           const srcId = `gibs-${key}`
@@ -218,7 +238,6 @@ export default function FlatMap({ onGlobeReady }) {
             maxzoom: key === 'gibsTrueColor' || key === 'gibsFires' ? 9 : 6,
           })
           const visible = dl0[key] === true
-          if (visible) anyGibs = true
           map.addLayer({
             id: srcId,
             type: 'raster',
@@ -239,9 +258,10 @@ export default function FlatMap({ onGlobeReady }) {
           source: 'terminator',
           layout: { visibility: termOn ? 'visible' : 'none' },
           paint: {
-            'line-color': 'rgba(120, 220, 255, 0.75)',
-            'line-width': 2,
-            'line-blur': 0.5,
+            'line-color': 'rgba(120, 180, 220, 0.55)',
+            'line-width': 1.5,
+            'line-dasharray': [2.5, 2.5],
+            'line-blur': 0.3,
           },
         })
         map.addSource('basemap-labels', {
@@ -258,7 +278,7 @@ export default function FlatMap({ onGlobeReady }) {
           source: 'countries',
           paint: {
             'fill-color': LAND_FILL,
-            'fill-opacity': anyGibs ? 0.12 : 0.92,
+            'fill-opacity': anyGibs ? LAND_FILL_OPACITY_GIBS : LAND_FILL_OPACITY,
             'fill-antialias': true,
           },
         })
@@ -267,10 +287,10 @@ export default function FlatMap({ onGlobeReady }) {
           type: 'line',
           source: 'countries',
           paint: {
-            'line-color': '#040814',
-            'line-opacity': 0.92,
-            'line-blur': 0.25,
-            'line-width': ['interpolate', ['linear'], ['zoom'], 1, 2.4, 4, 4.5, 10, 7],
+            'line-color': BORDER_HALO,
+            'line-opacity': 0.9,
+            'line-blur': 0.15,
+            'line-width': ['interpolate', ['linear'], ['zoom'], 1, 1.6, 4, 2.6, 10, 4],
           },
         })
         map.addLayer({
@@ -278,44 +298,10 @@ export default function FlatMap({ onGlobeReady }) {
           type: 'line',
           source: 'countries',
           paint: {
-            'line-color': 'rgba(236, 242, 255, 0.78)',
+            'line-color': BORDER_COLOR,
             'line-opacity': 1,
             'line-blur': 0,
-            'line-width': ['interpolate', ['linear'], ['zoom'], 1, 0.85, 4, 1.35, 10, 2.35],
-          },
-        })
-        map.addLayer({
-          id: 'states-fill',
-          type: 'fill',
-          source: 'states',
-          minzoom: 3,
-          paint: {
-            'fill-color': LAND_FILL,
-            'fill-opacity': anyGibs ? 0.12 : 0.92,
-            'fill-antialias': true,
-          },
-        })
-        map.addLayer({
-          id: 'states-line-back',
-          type: 'line',
-          source: 'states',
-          minzoom: 3,
-          paint: {
-            'line-color': '#03060f',
-            'line-opacity': 0.88,
-            'line-blur': 0.2,
-            'line-width': ['interpolate', ['linear'], ['zoom'], 3, 2.2, 6, 4.2, 10, 6],
-          },
-        })
-        map.addLayer({
-          id: 'states-line',
-          type: 'line',
-          source: 'states',
-          minzoom: 3,
-          paint: {
-            'line-color': 'rgba(232, 238, 252, 0.72)',
-            'line-opacity': 1,
-            'line-width': ['interpolate', ['linear'], ['zoom'], 3, 0.75, 7, 1.35, 11, 2.2],
+            'line-width': ['interpolate', ['linear'], ['zoom'], 1, 0.55, 4, 0.9, 10, 1.5],
           },
         })
         map.addLayer({
@@ -323,7 +309,7 @@ export default function FlatMap({ onGlobeReady }) {
           type: 'raster',
           source: 'basemap-labels',
           paint: {
-            'raster-opacity': 1,
+            'raster-opacity': 0.92,
             'raster-fade-duration': 150,
           },
         })
@@ -343,8 +329,8 @@ export default function FlatMap({ onGlobeReady }) {
               ['get', 'radius_max'],
             ],
             'circle-opacity': ['get', 'opacity'],
-            'circle-stroke-color': 'rgba(255,255,255,0.3)',
-            'circle-stroke-width': 0.8,
+            'circle-stroke-color': 'rgba(255,255,255,0.28)',
+            'circle-stroke-width': 0.9,
           },
         })
         map.addSource('events-detection', {
@@ -428,6 +414,23 @@ export default function FlatMap({ onGlobeReady }) {
         applyGlobeMapClick({ lat: e.lngLat.lat, lng: e.lngLat.lng })
       })
 
+      map.on('contextmenu', (e) => {
+        e.preventDefault()
+        const canvas = map.getCanvas()
+        const rect = canvas?.getBoundingClientRect?.()
+        applyGlobeMapContextMenu({
+          lat: e.lngLat.lat,
+          lng: e.lngLat.lng,
+          screenX: rect ? rect.left + e.point.x : e.point.x,
+          screenY: rect ? rect.top + e.point.y : e.point.y,
+        })
+      })
+
+      map.on('mousemove', (e) => {
+        applyCursorCoords(e.lngLat.lat, e.lngLat.lng)
+      })
+      map.on('mouseout', () => clearCursorCoords())
+
       map.on('mouseenter', 'countries-fill', () => {
         if (mapRef.current) mapRef.current.getCanvas().style.cursor = 'pointer'
       })
@@ -449,6 +452,7 @@ export default function FlatMap({ onGlobeReady }) {
       setMapReady(false)
       setOnResetView(null)
       setOnFlyToLocation(null)
+      clearCursorCoords()
       mapRef.current = null
       if (map) {
         map.remove()
@@ -499,7 +503,7 @@ export default function FlatMap({ onGlobeReady }) {
       m.setPaintProperty(
         'events-circle',
         'circle-stroke-color',
-        detectionMode ? 'rgba(136, 255, 170, 0.55)' : 'rgba(255,255,255,0.3)',
+        detectionMode ? 'rgba(136, 255, 170, 0.55)' : 'rgba(255,255,255,0.28)',
       )
     }
   }, [visibleEvents, detectionMode, detectionLabelDensity, selectedEvent?.id, mapReady])
@@ -519,11 +523,15 @@ export default function FlatMap({ onGlobeReady }) {
       const termOn = dataLayers?.terminator !== false
       m.setLayoutProperty('terminator-line', 'visibility', termOn ? 'visible' : 'none')
     }
-    if (m.getLayer('countries-fill')) {
-      m.setPaintProperty('countries-fill', 'fill-opacity', anyGibs ? 0.12 : 0.92)
+    if (m.getLayer('basemap')) {
+      m.setPaintProperty('basemap', 'raster-opacity', anyGibs ? 0.35 : 1)
     }
-    if (m.getLayer('states-fill')) {
-      m.setPaintProperty('states-fill', 'fill-opacity', anyGibs ? 0.12 : 0.92)
+    if (m.getLayer('countries-fill')) {
+      m.setPaintProperty(
+        'countries-fill',
+        'fill-opacity',
+        anyGibs ? LAND_FILL_OPACITY_GIBS : LAND_FILL_OPACITY,
+      )
     }
   }, [dataLayers])
 

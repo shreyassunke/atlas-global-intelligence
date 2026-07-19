@@ -1,10 +1,15 @@
 /**
- * Macro/micro indicator HUD strip — Phase 3.
- * Always visible: global VIX/FX by default; place-specific GDP when dossier/search/event scoped.
+ * Macro/micro indicator HUD strip — quiet one-line readout.
+ * Global VIX/FX by default; place-scoped GDP/FX when a dossier, search
+ * result, or event is selected. Dead cards (missing key / no data) are
+ * hidden rather than rendered as broken placeholders; degraded sources
+ * show a subtle amber dot with a tooltip.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useAtlasStore } from '../../store/atlasStore'
 import { fetchPlaceIndicators, INDICATOR_POLL_MS } from '../../services/indicators/indicatorService.js'
+import { Tooltip } from '../ui/tooltip.jsx'
+import { cn } from '../../lib/utils'
 
 function Sparkline({ values }) {
   if (!values?.length) return null
@@ -13,30 +18,40 @@ function Sparkline({ values }) {
   const range = max - min || 1
 
   return (
-    <div className="place-indicator-card__sparkline" aria-hidden>
+    <span className="ml-1.5 inline-flex h-3 items-end gap-px" aria-hidden>
       {values.map((v, i) => (
         <span
           key={i}
-          className="place-indicator-card__spark-bar"
+          className="w-[3px] rounded-[1px] bg-accent/55"
           style={{ height: `${Math.max(15, ((v - min) / range) * 100)}%` }}
         />
       ))}
-    </div>
+    </span>
   )
 }
 
+function isLiveIndicator(ind) {
+  if (!ind) return false
+  if (ind.status === 'missing_key' || ind.status === 'unavailable') return false
+  const v = String(ind.value ?? '').trim()
+  return v !== '' && v !== '—' && v !== '--' && v !== '-'
+}
+
 function IndicatorCard({ indicator }) {
-  const degraded = indicator.status === 'degraded' || indicator.status === 'missing_key'
+  const degraded = indicator.status === 'degraded'
   return (
-    <div
-      className={`place-indicator-card${degraded ? ' place-indicator-card--degraded' : ''}`}
-      title={indicator.hint || indicator.cadence}
-    >
-      <span className="place-indicator-card__label">{indicator.label}</span>
-      <span className="place-indicator-card__value">{indicator.value}</span>
-      <span className="place-indicator-card__cadence">{indicator.cadence}</span>
-      <Sparkline values={indicator.sparkline} />
-    </div>
+    <Tooltip label={indicator.hint || indicator.cadence}>
+      <span className="inline-flex items-center gap-1.5 whitespace-nowrap px-2 py-0.5">
+        <span className="font-data text-[9px] uppercase tracking-[0.08em] text-faint">
+          {indicator.label}
+        </span>
+        <span className={cn('font-data text-[12px] font-semibold leading-none', degraded ? 'text-muted' : 'text-text')}>
+          {indicator.value}
+        </span>
+        {degraded && <span className="h-1.5 w-1.5 rounded-full bg-p2/80" aria-label="Degraded source" />}
+        {!degraded && <Sparkline values={indicator.sparkline} />}
+      </span>
+    </Tooltip>
   )
 }
 
@@ -85,14 +100,12 @@ export default function PlaceIndicatorStrip({ hidden = false }) {
   }, [dossier, selectedPlace, searchHighlight, selectedEvent])
 
   const [indicators, setIndicators] = useState([])
-  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     let cancelled = false
     const controller = new AbortController()
 
     async function load() {
-      setLoading(true)
       try {
         const data = await fetchPlaceIndicators({
           iso: place.iso || undefined,
@@ -104,8 +117,6 @@ export default function PlaceIndicatorStrip({ hidden = false }) {
         if (!cancelled) setIndicators(data)
       } catch {
         if (!cancelled) setIndicators([])
-      } finally {
-        if (!cancelled) setLoading(false)
       }
     }
 
@@ -118,37 +129,41 @@ export default function PlaceIndicatorStrip({ hidden = false }) {
     }
   }, [place.name, place.iso, place.lat, place.lng, place.scoped])
 
+  const liveIndicators = useMemo(() => indicators.filter(isLiveIndicator), [indicators])
+
   if (hidden) return null
+  // Nothing worth showing: unscoped view with no live data stays silent.
+  if (!place.scoped && liveIndicators.length === 0) return null
 
   return (
     <div
-      className={`place-indicator-strip${place.scoped ? '' : ' place-indicator-strip--global'}`}
+      className="place-indicator-strip fixed left-1/2 z-[41] flex max-w-[min(920px,calc(100vw-32px))] -translate-x-1/2 items-center gap-1 rounded-lg border border-line bg-bg/80 px-2.5 py-1 backdrop-blur-xl print:hidden"
+      style={{ top: 'var(--hud-stack-bottom, 78px)' }}
       role="region"
       aria-label="Macro indicators"
     >
-      <div className="place-indicator-strip__place">
-        <span className="place-indicator-strip__place-name">{place.name}</span>
-        {place.iso ? (
-          <span className="place-indicator-strip__place-iso">{place.iso}</span>
-        ) : (
-          <span className="place-indicator-strip__place-iso">click country for GDP</span>
+      <div className="flex min-w-0 flex-col justify-center border-r border-line pr-2.5 mr-1">
+        <span className="max-w-[150px] truncate font-ui text-[11px] font-semibold leading-tight text-text">
+          {place.name}
+        </span>
+        {place.iso && (
+          <span className="font-data text-[8px] uppercase tracking-[0.1em] text-faint">{place.iso}</span>
         )}
       </div>
-      <div className="place-indicator-strip__items">
-        {loading && indicators.length === 0 ? (
-          <span className="atlas-provenance-chip">Loading indicators…</span>
-        ) : indicators.length === 0 ? (
-          <span className="atlas-provenance-chip atlas-provenance-chip--missing">
-            No indicators — check API keys
+
+      <div className="flex flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none]">
+        {liveIndicators.map((ind) => <IndicatorCard key={ind.id} indicator={ind} />)}
+        {liveIndicators.length === 0 && (
+          <span className="px-2 font-data text-[9px] uppercase tracking-[0.08em] text-faint">
+            No live indicators
           </span>
-        ) : (
-          indicators.map((ind) => <IndicatorCard key={ind.id} indicator={ind} />)
         )}
       </div>
+
       {place.scoped && (
         <button
           type="button"
-          className="place-indicator-strip__dossier-btn"
+          className="ml-1 inline-flex shrink-0 cursor-pointer items-center justify-center rounded-md border border-accent-border bg-accent-dim px-2.5 py-1 font-data text-[9px] uppercase tracking-[0.1em] text-accent transition-colors duration-150 hover:bg-accent/20"
           title="Open full dossier and export report"
           onClick={() => openDossier({
             name: place.name,

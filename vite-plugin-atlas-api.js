@@ -51,6 +51,7 @@ const DEV_API_ROUTES = [
   { method: 'GET', match: /^\/api\/opensky-states\/?$/, module: path.join(pluginRoot, 'api/opensky-states.js') },
   { method: 'GET', match: /^\/api\/celestrak-tle\/?$/, module: path.join(pluginRoot, 'api/celestrak-tle.js') },
   { method: 'GET', match: /^\/api\/aisstream-ships\/?$/, module: path.join(pluginRoot, 'api/aisstream-ships.js') },
+  { method: 'GET', match: /^\/api\/cameras\/?$/, module: path.join(pluginRoot, 'api/cameras.js') },
   { method: 'GET', match: /^\/api\/nhc-storms\/?$/, module: path.join(pluginRoot, 'api/nhc-storms.js') },
   { method: 'GET', match: /^\/api\/gdacs-rss\/?$/, module: path.join(pluginRoot, 'api/gdacs-rss.js') },
   { methods: ['GET', 'OPTIONS'], match: /^\/api\/feed-proxy\/?$/, module: path.join(pluginRoot, 'api/feed-proxy.js') },

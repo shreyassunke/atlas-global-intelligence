@@ -3,9 +3,12 @@ import { motion } from 'framer-motion'
 import { supabase } from '../../services/supabase'
 import { useAtlasStore } from '../../store/atlasStore'
 
-export default function AuthStep() {
+/**
+ * Sign-in / register form. Used from the header account menu.
+ * @param {{ onSuccess?: (user: object|null) => void, allowGuest?: boolean }} props
+ */
+export default function AuthStep({ onSuccess, allowGuest = false }) {
   const setUser = useAtlasStore((s) => s.setUser)
-  const setOnboardingStep = useAtlasStore((s) => s.setOnboardingStep)
 
   const [mode, setMode] = useState('idle')
   const [email, setEmail] = useState('')
@@ -16,7 +19,7 @@ export default function AuthStep() {
 
   const proceed = (user) => {
     if (user) setUser(user)
-    setOnboardingStep('sources')
+    onSuccess?.(user ?? null)
   }
 
   const handleGoogle = async () => {
@@ -168,13 +171,15 @@ export default function AuthStep() {
           {mode === 'register' ? 'Already have an account? Sign in' : 'New here? Create an account'}
         </button>
 
-        <button
-          type="button"
-          onClick={() => proceed(null)}
-          className="auth-link text-xs"
-        >
-          Continue without an account
-        </button>
+        {allowGuest && (
+          <button
+            type="button"
+            onClick={() => proceed(null)}
+            className="auth-link text-xs"
+          >
+            Continue without an account
+          </button>
+        )}
       </div>
     </motion.div>
   )

@@ -7,7 +7,7 @@
  * sorted by corroboration), narrative (Context sentences, source-country
  * breakdown, actor pairs), and evidence (DOC articles + TV clips).
  *
- * Entry points: choropleth country click, Inspector "Open dossier",
+ * Entry points: country context menu → dossier, Inspector "Open dossier",
  * place-search results, watchlist rows, and the `?dossier=` URL param.
  * No new backend — every section is an existing API/template.
  */
@@ -24,6 +24,7 @@ import {
   Bar,
 } from 'recharts'
 import { useAtlasStore } from '../../store/atlasStore'
+import { isWithinAtlasCycle } from '../../core/atlasCycle'
 import {
   fetchTimelineVol,
   fetchTimelineTone,
@@ -38,7 +39,7 @@ import { fetchCountryStability, fetchEventSurge, fetchActorNetwork } from '../..
 import { loadCountryIndex } from '../../services/countryIndex'
 import ClipGallery from '../UI/ClipGallery'
 import GdeltAttribution from '../UI/GdeltAttribution'
-import { DIMENSION_COLORS, DIMENSION_ICONS, DIMENSION_LABELS, formatToneScore } from '../../core/eventSchema'
+import { formatToneScore } from '../../core/eventSchema'
 import { buildDossierBriefMarkdown, downloadMarkdownBrief } from '../../core/briefExport'
 import { buildShareUrl } from '../../core/urlState'
 import ReportExportPanel from '../UI/ReportExportPanel'
@@ -220,22 +221,14 @@ export default function DossierTab() {
 
   const countryEvents = useMemo(() => {
     if (!target) return []
-    const list = events.filter((evt) => eventMatchesCountry(evt, target))
+    const list = events.filter((evt) =>
+      eventMatchesCountry(evt, target) && isWithinAtlasCycle(evt))
     list.sort((a, b) =>
       (b.corroborationScore || 0) - (a.corroborationScore || 0) ||
       (b.severity || 0) - (a.severity || 0) ||
       new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
     return list
   }, [events, target])
-
-  const dimensionMix = useMemo(() => {
-    const counts = {}
-    for (const evt of countryEvents) {
-      if (!evt.dimension) continue
-      counts[evt.dimension] = (counts[evt.dimension] || 0) + 1
-    }
-    return Object.entries(counts).sort((a, b) => b[1] - a[1])
-  }, [countryEvents])
 
   const liveAggregate = target?.fips ? aggregates?.byFips?.[target.fips] : null
 
@@ -365,7 +358,6 @@ export default function DossierTab() {
     const state = useAtlasStore.getState()
     const shareUrl = buildShareUrl({
       activeDimensions: state.activeDimensions,
-      priorityFilter: state.priorityFilter,
       timeFilter: state.timeFilter,
       dataLayers: state.dataLayers,
       globeMode: state.globeMode,
@@ -401,9 +393,10 @@ export default function DossierTab() {
     return (
       <div className="flex flex-col gap-4" style={{ fontFamily: 'var(--font-data)' }}>
         <p className="text-[11px] leading-relaxed text-white/45">
-          Open a dossier from a choropleth country, a place search result,
-          a watchlist row, or an event&apos;s “Open dossier” action — or pick a
-          currently active country below.
+          Open a dossier from the country right-click menu (National Economy →
+          full dossier), a place search result, a watchlist row, or an
+          event&apos;s “Open dossier” action — or pick a currently active
+          country below.
         </p>
         {quickPicks.length > 0 && (
           <Section title="Most active right now" provenance="GDELT 15-min export">
@@ -489,16 +482,6 @@ export default function DossierTab() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {dimensionMix.map(([dim, count]) => (
-            <span
-              key={dim}
-              className="inline-flex items-center gap-1 rounded-full border border-white/[0.07] px-2 py-0.5 text-[9px] text-white/60"
-              title={DIMENSION_LABELS[dim] || dim}
-            >
-              <span style={{ color: DIMENSION_COLORS[dim] }}>{DIMENSION_ICONS[dim]}</span>
-              {count}
-            </span>
-          ))}
           {tone && (
             <span className={`text-[9px] tone-indicator tone-${tone.sentiment}`}>
               tone {tone.label} ({tone.score})
@@ -563,7 +546,7 @@ export default function DossierTab() {
       {/* ── Live signals ── */}
       <Section title={`Live signals (${countryEvents.length})`} provenance="ATLAS event bus">
         {countryEvents.length === 0 ? (
-          <Empty>No live events scoped to {target.name} under the current filters.</Empty>
+          <Empty>No live events scoped to {target.name} under the current layers and time range.</Empty>
         ) : (
           <ul className="flex flex-col gap-1">
             {countryEvents.slice(0, 12).map((evt) => (
@@ -573,9 +556,7 @@ export default function DossierTab() {
                   className="flex w-full items-start gap-2 rounded-md border border-white/[0.05] bg-white/[0.02] px-2.5 py-2 text-left transition hover:bg-white/[0.06]"
                   onClick={() => handleSignalClick(evt)}
                 >
-                  <span className="mt-0.5 shrink-0" style={{ color: DIMENSION_COLORS[evt.dimension] }}>
-                    {DIMENSION_ICONS[evt.dimension] || '•'}
-                  </span>
+                  <span className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-accent/80" aria-hidden />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[11px] text-white/80">{evt.title}</span>
                     <span className="mt-0.5 block font-mono text-[9px] text-white/35">

@@ -5,9 +5,9 @@
 /** @typedef {'pending'|'loading'|'ready'|'skipped'|'failed'} BootstrapStatus */
 
 /** Minimum time the splash is visible (avoids a flash). */
-export const BOOTSTRAP_MIN_MS = 1800
+export const BOOTSTRAP_MIN_MS = 400
 /** Hard cap — HUD unlocks even if slow feeds are still warming up. */
-export const BOOTSTRAP_MAX_MS = 9000
+export const BOOTSTRAP_MAX_MS = 4000
 
 /** Only these worker sources require an API key — safe to skip in UI when absent. */
 export const KEYED_OPTIONAL_SOURCES = new Set([
@@ -63,6 +63,7 @@ export const LAYER_SOURCE_MAP = {
   adsb: { sources: ['opensky'], label: 'ADS-B aircraft' },
   satellites: { sources: ['celestrak-tle'], label: 'Satellite catalog' },
   ais: { sources: ['aisstream'], label: 'AIS vessel tracking', optionalKeyed: true },
+  cameras: { sources: ['cameras'], label: 'Live cameras', optionalKeyed: true },
   nhcStorms: { sources: ['noaa-nhc'], label: 'NOAA hurricane tracks' },
 }
 
@@ -213,19 +214,13 @@ export function bootstrapProgress(steps, elapsedMs) {
 }
 
 export function isBootstrapCompleteFromCtx(steps, { elapsedMs, globeReady, workersReady, sourceStatuses }) {
-  if (!workersReady) return false
-  if (elapsedMs < BOOTSTRAP_MIN_MS) return false
-  // Never block the HUD past the hard cap — tactical feeds keep loading in the background.
+  // Never block the HUD past the hard cap — feeds keep loading in the background.
   if (elapsedMs >= BOOTSTRAP_MAX_MS) return true
-
-  if (!globeReady) return false
-
-  const gdeltEvents =
-    (sourceStatuses.gdelt?.eventCount ?? 0) > 0 ||
-    (sourceStatuses['gdelt-cameo']?.eventCount ?? 0) > 0
-  if (gdeltEvents) return true
-
-  return elapsedMs >= BOOTSTRAP_MIN_MS + 2500
+  // Globe painted — unlock HUD quickly; do not wait on workers or GDELT.
+  if (globeReady && elapsedMs >= BOOTSTRAP_MIN_MS) return true
+  // Workers late but globe is up — still unblock after a short grace period.
+  if (globeReady && elapsedMs >= 2000) return true
+  return false
 }
 
 /** Worker sources polled first (immediate, no stagger). */

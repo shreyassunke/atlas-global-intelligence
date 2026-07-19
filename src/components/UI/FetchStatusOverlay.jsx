@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { subscribeToSourceStatus, getSourceStatuses } from '../../core/eventBus'
+import {
+  getGdeltSignalMetrics,
+  subscribeGdeltSignalMetrics,
+} from '../../services/gdelt/gdeltSignalMetrics'
 
 /**
  * Dev-only overlay showing the live status of every worker source. Any source
@@ -41,11 +45,17 @@ export default function FetchStatusOverlay() {
   const [enabled] = useState(isDebugEnabled)
   const [collapsed, setCollapsed] = useState(false)
   const [statuses, setStatuses] = useState(() => getSourceStatuses())
+  const [gdelt, setGdelt] = useState(() => getGdeltSignalMetrics())
 
   useEffect(() => {
     if (!enabled) return
     const unsub = subscribeToSourceStatus(setStatuses)
     return () => unsub && unsub()
+  }, [enabled])
+
+  useEffect(() => {
+    if (!enabled) return
+    return subscribeGdeltSignalMetrics(setGdelt)
   }, [enabled])
 
   const rows = useMemo(() => {
@@ -63,7 +73,7 @@ export default function FetchStatusOverlay() {
         right: 12,
         bottom: 12,
         zIndex: 10_000,
-        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+        fontFamily: 'var(--font-data)',
         fontSize: 11,
         color: '#e5e7eb',
         background: 'rgba(15, 23, 42, 0.88)',
@@ -95,49 +105,72 @@ export default function FetchStatusOverlay() {
         <span style={{ color: '#94a3b8' }}>{collapsed ? '▲' : '▼'}</span>
       </div>
       {!collapsed && (
-        <table style={{ borderCollapse: 'collapse', width: '100%' }}>
-          <thead>
-            <tr style={{ color: '#94a3b8', textAlign: 'left' }}>
-              <th style={{ paddingRight: 8 }}>source</th>
-              <th style={{ paddingRight: 8 }}>events</th>
-              <th style={{ paddingRight: 8 }}>updated</th>
-              <th>state</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={4} style={{ color: '#94a3b8', paddingTop: 6 }}>
-                  waiting for first fetch…
-                </td>
+        <>
+          <div
+            style={{
+              marginBottom: 10,
+              paddingBottom: 8,
+              borderBottom: '1px solid rgba(148, 163, 184, 0.2)',
+              color: '#cbd5f5',
+              lineHeight: 1.45,
+            }}
+          >
+            <div style={{ color: '#94a3b8', marginBottom: 4, letterSpacing: 0.4 }}>
+              GDELT SIGNAL
+            </div>
+            <div>ttfh: {gdelt.ttfhMs != null ? `${gdelt.ttfhMs}ms` : '—'}</div>
+            <div>cache: {gdelt.cacheLayer || '—'}</div>
+            <div>gate wait: {gdelt.gateWaitMs != null ? `${gdelt.gateWaitMs}ms` : '—'}</div>
+            <div>429s: {gdelt.gdelt429Count}</div>
+            <div>ladder rungs: {gdelt.ladderRungsUsed != null ? gdelt.ladderRungsUsed : '—'}</div>
+            <div>
+              queue i/b: {gdelt.interactiveQueued}/{gdelt.backgroundQueued}
+            </div>
+          </div>
+          <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+            <thead>
+              <tr style={{ color: '#94a3b8', textAlign: 'left' }}>
+                <th style={{ paddingRight: 8 }}>source</th>
+                <th style={{ paddingRight: 8 }}>events</th>
+                <th style={{ paddingRight: 8 }}>updated</th>
+                <th>state</th>
               </tr>
-            )}
-            {rows.map((row) => (
-              <tr key={row.id}>
-                <td
-                  style={{
-                    paddingRight: 8,
-                    color: statusColor(row),
-                    whiteSpace: 'nowrap',
-                  }}
-                  title={row.error || row.warning || ''}
-                >
-                  ● {row.id}
-                </td>
-                <td style={{ paddingRight: 8, fontVariantNumeric: 'tabular-nums' }}>
-                  {row.eventCount ?? 0}
-                </td>
-                <td style={{ paddingRight: 8, color: '#cbd5f5' }}>
-                  {formatRelativeTime(row.lastFetch)}
-                </td>
-                <td style={{ color: '#cbd5f5' }}>
-                  {row.status || '—'}
-                  {row.warning ? ' ⚠' : ''}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.length === 0 && (
+                <tr>
+                  <td colSpan={4} style={{ color: '#94a3b8', paddingTop: 6 }}>
+                    waiting for first fetch…
+                  </td>
+                </tr>
+              )}
+              {rows.map((row) => (
+                <tr key={row.id}>
+                  <td
+                    style={{
+                      paddingRight: 8,
+                      color: statusColor(row),
+                      whiteSpace: 'nowrap',
+                    }}
+                    title={row.error || row.warning || ''}
+                  >
+                    ● {row.id}
+                  </td>
+                  <td style={{ paddingRight: 8, fontVariantNumeric: 'tabular-nums' }}>
+                    {row.eventCount ?? 0}
+                  </td>
+                  <td style={{ paddingRight: 8, color: '#cbd5f5' }}>
+                    {formatRelativeTime(row.lastFetch)}
+                  </td>
+                  <td style={{ color: '#cbd5f5' }}>
+                    {row.status || '—'}
+                    {row.warning ? ' ⚠' : ''}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
       )}
     </div>
   )

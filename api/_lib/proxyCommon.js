@@ -53,7 +53,7 @@ export function envKeys(...names) {
 
 /** In-memory TTL cache for edge handlers (resets on cold start). */
 export function createEdgeCache() {
-  /** @type {Map<string, { body: ArrayBuffer, contentType: string, status: number, ts: number, cacheSec: number }>} */
+  /** @type {Map<string, { body: ArrayBuffer|Uint8Array, contentType: string, status: number, ts: number, cacheSec: number, swrSec?: number }>} */
   const store = new Map()
 
   return {
@@ -61,10 +61,13 @@ export function createEdgeCache() {
       const hit = store.get(key)
       if (!hit) return null
       if (Date.now() - hit.ts > hit.cacheSec * 1000) {
-        store.delete(key)
         return null
       }
       return hit
+    },
+    /** Return entry even after fresh TTL (for SWR / stale-if-error). */
+    getStale(key) {
+      return store.get(key) || null
     },
     set(key, entry) {
       store.set(key, entry)

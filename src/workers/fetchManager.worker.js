@@ -15,6 +15,7 @@ import {
 import { getActivePollSourceIds } from '../core/layerSources.js'
 import { acledAdapter, buildAdapterPollConfigs } from '../adapters/index.js'
 import { classifyEnvironmentHazard } from '../core/environmentHazardClassifier.js'
+import { filterToAtlasCycle } from '../core/atlasCycle.js'
 
 const INITIAL_BACKOFF = 5000
 const MAX_BACKOFF = 300_000
@@ -71,7 +72,7 @@ async function fetchText(url) {
 
 // ── Shared helpers ──
 
-const DIMENSION_COLORS = { safety: '#E24B4A', governance: '#7F77DD', economy: '#EF9F27', people: '#1D9E75', environment: '#888780', narrative: '#378ADD' }
+const DIMENSION_COLORS = { safety: '#E24B4A', governance: '#7F77DD', economy: '#EF9F27', people: '#1D9E75', environment: '#7CB342', narrative: '#378ADD' }
 const CORROBORATION_OPACITY = { 1: 0.35, 2: 0.55, 3: 0.75, 4: 0.88, 5: 1.0 }
 
 function createEventId(lat, lng, timestamp, source, title) {
@@ -85,17 +86,12 @@ function createEventId(lat, lng, timestamp, source, title) {
 }
 
 function makeEvent(fields) {
-  const priority = fields.priority || fields.priority || 'p3'
-
-  
   const corrobCount = Math.min(Math.max(fields.corroborationCount || 1, 1), 5)
   const isAuth = fields.authoritative || false
   const baseOpacity = CORROBORATION_OPACITY[corrobCount] || 0.35
 
   const event = {
     id: fields.id || '',
-    priority,
-    priority: priority, // legacy compat
 
     
     dimension: fields.dimension || 'narrative',
@@ -152,6 +148,9 @@ function makeEvent(fields) {
     ...(fields.coneCoords ? { coneCoords: fields.coneCoords } : {}),
     // Phase 6 — stretch signals
     ...(fields.imageUrl ? { imageUrl: fields.imageUrl } : {}),
+    ...(fields.playerUrl ? { playerUrl: fields.playerUrl } : {}),
+    ...(fields.streamUrl ? { streamUrl: fields.streamUrl } : {}),
+    ...(fields.cameraProvider ? { cameraProvider: fields.cameraProvider } : {}),
     ...(fields.visualLabels ? { visualLabels: fields.visualLabels } : {}),
     ...(fields.socialReach ? { socialReach: fields.socialReach } : {}),
     ...(fields.blueskyUri ? { blueskyUri: fields.blueskyUri } : {}),
@@ -369,15 +368,13 @@ const NORMALIZERS = {
         const p = f.properties
         const [lng, lat] = f.geometry.coordinates
         const mag = p.mag
-        let priority = 'p3', severity = 1
-        if (mag >= 7.0) { priority = 'p1'; severity = 5 }
-        else if (mag >= 6.0) { priority = 'p1'; severity = 4 }
-        else if (mag >= 5.5) { priority = 'p2'; severity = 3 }
-        else if (mag >= 5.0) { priority = 'p2'; severity = 2 }
+        let severity = 1
+        if (mag >= 7.0) { severity = 5 }
+        else if (mag >= 6.0) { severity = 4 }
+        else if (mag >= 5.5) { severity = 3 }
+        else if (mag >= 5.0) { severity = 2 }
         return makeEvent({
           id: createEventId(lat, lng, p.time, 'usgs', p.title || ''),
-          priority,
-    priority: priority, // legacy compat
  dimension: 'environment', lat, lng, severity,
           corroborationSources: ['usgs'], authoritative: true, ttl: 360,
           title: p.title || `M${mag} Earthquake`,
@@ -408,14 +405,12 @@ const NORMALIZERS = {
 
       const alertM = item.match(/<gdacs:alertlevel>([^<]+)/)
       const alertLevel = alertM ? alertM[1].trim().toLowerCase() : ''
-      let priority = 'p3', severity = 2
-      if (alertLevel === 'red') { priority = 'p1'; severity = 5 }
-      else if (alertLevel === 'orange') { priority = 'p2'; severity = 3 }
+      let severity = 2
+      if (alertLevel === 'red') { severity = 5 }
+      else if (alertLevel === 'orange') { severity = 3 }
 
       events.push(makeEvent({
         id: createEventId(lat, lng, Date.parse(pubDate || Date.now()), 'gdacs', title),
-        priority,
-    priority: priority, // legacy compat
  dimension: 'environment', lat, lng, severity,
         corroborationSources: ['gdacs'], authoritative: true, ttl: 600,
         title, detail: description, source: 'GDACS',
@@ -440,7 +435,6 @@ const NORMALIZERS = {
         const isSevere = ['volcanoes', 'severeStorms', 'floods', 'landslides'].includes(catId)
         return makeEvent({
           id: createEventId(lat, lng, Date.parse(geo.date || Date.now()), 'eonet', e.title),
-          priority: isSevere ? 'p2' : 'p3',
           dimension: 'environment', lat, lng, severity: isSevere ? 3 : 1,
           corroborationSources: ['eonet'], authoritative: true, ttl: 1800,
           title: e.title || 'Natural Event',
@@ -458,13 +452,11 @@ const NORMALIZERS = {
     const latest = data[data.length - 1]
     const kp = parseFloat(latest.kp_index ?? latest.Kp ?? 0)
     if (kp < 4) return []
-    let priority = 'p3', severity = 1
-    if (kp >= 7) { priority = 'p1'; severity = 5 }
-    else if (kp >= 5) { priority = 'p2'; severity = 3 }
+    let severity = 1
+    if (kp >= 7) { severity = 5 }
+    else if (kp >= 5) { severity = 3 }
     return [makeEvent({
       id: createEventId(65, 0, Date.now(), 'noaa-kp', `Kp ${kp}`),
-      priority,
-    priority: priority, // legacy compat
  dimension: 'narrative', lat: 65, lng: 0, latApproximate: true,
       severity, corroborationSources: ['noaa-kp'], authoritative: true, ttl: 600,
       title: `Geomagnetic Storm — Kp ${kp.toFixed(1)}`,
@@ -483,7 +475,6 @@ const NORMALIZERS = {
     const isMClass = flux >= 1e-5
     return [makeEvent({
       id: createEventId(0, 0, Date.now(), 'noaa-xray', `X-ray ${flux.toExponential(1)}`),
-      priority: isXClass ? 'p1' : 'p2',
       dimension: isXClass ? 'environment' : 'narrative',
       lat: 0, lng: 0, latApproximate: true,
       severity: isXClass ? 5 : isMClass ? 3 : 1,
@@ -503,7 +494,6 @@ const NORMALIZERS = {
     const isExtreme = speed >= 800
     return [makeEvent({
       id: createEventId(70, -30, Date.now(), 'noaa-sw', `SW ${Math.round(speed)} km/s`),
-      priority: isExtreme ? 'p2' : 'p3',
       dimension: 'narrative', lat: 70, lng: -30, latApproximate: true,
       severity: isExtreme ? 3 : 1,
       corroborationSources: ['noaa-sw'], authoritative: true, ttl: 600,
@@ -522,12 +512,10 @@ const NORMALIZERS = {
     for (const [coin, info] of Object.entries(data)) {
       const change = info?.usd_24h_change
       if (change === undefined || Math.abs(change) < 5) continue
-      const priority = Math.abs(change) >= 15 ? 'p2' : 'p3'
+      Math.abs(change) >= 15 ? 'p2' : 'p3'
       const severity = Math.abs(change) >= 15 ? 3 : Math.abs(change) >= 10 ? 2 : 1
       events.push(makeEvent({
         id: createEventId(40.7, -74.0, Date.now(), 'coingecko', `${coin} ${change.toFixed(1)}%`),
-        priority,
-    priority: priority, // legacy compat
  dimension: 'economy', lat: 40.7128, lng: -74.006, latApproximate: true,
         severity, corroborationSources: ['coingecko'], ttl: 900,
         title: `${coin.toUpperCase()} ${change > 0 ? '▲' : '▼'} ${Math.abs(change).toFixed(1)}% (24h)`,
@@ -547,7 +535,6 @@ const NORMALIZERS = {
     const isExtremeFear = value < 25
     return [makeEvent({
       id: createEventId(40.7, -74.0, Date.now(), 'alt-fng', `F&G ${value}`),
-      priority: value < 10 || value > 90 ? 'p2' : 'p3',
       dimension: 'economy', lat: 40.7128, lng: -74.006, latApproximate: true,
       severity: value < 10 || value > 90 ? 3 : 1,
       corroborationSources: ['alt-fng'], ttl: 3600,
@@ -569,7 +556,6 @@ const NORMALIZERS = {
       .slice(-15)
       .map(v => makeEvent({
         id: createEventId(38.9, -77.0, Date.parse(v.dateAdded), 'cisa-kev', v.cveID || ''),
-        priority: 'p2', dimension: 'safety', lat: 38.8951, lng: -77.0364, latApproximate: true,
         severity: 3, corroborationSources: ['cisa-kev'], authoritative: true, ttl: 3600,
         title: `CVE: ${v.cveID} — ${v.vendorProject || 'Unknown'}`,
         detail: `${v.vulnerabilityName || ''}. ${v.shortDescription || ''}`.trim(),
@@ -609,17 +595,16 @@ const NORMALIZERS = {
         ? toneParts.avgTone
         : (parseFloat(String(props.tone).split(',')[0]) || 0)
       const hinted = props._atlasDimensionHint
-      let priority = 'p3'
       let severity = 1
       let dimension = typeof hinted === 'string' && hinted ? hinted : 'narrative'
 
       if (!hinted) {
-        if (tone <= -5) { priority = 'p2'; severity = 3; dimension = 'safety' }
-        else if (tone <= -2) { priority = 'p2'; severity = 2; dimension = 'safety' }
-        else if (tone >= 5) { priority = 'p3'; severity = 1; dimension = 'narrative' }
+        if (tone <= -5) { severity = 3; dimension = 'safety' }
+        else if (tone <= -2) { severity = 2; dimension = 'safety' }
+        else if (tone >= 5) { severity = 1; dimension = 'narrative' }
       } else {
-        if (tone <= -5) { priority = 'p2'; severity = Math.max(severity, 3) }
-        else if (tone <= -2) { priority = 'p2'; severity = Math.max(severity, 2) }
+        if (tone <= -5) { severity = Math.max(severity, 3) }
+        else if (tone <= -2) { severity = Math.max(severity, 2) }
       }
 
       const count = parseInt(props.numarts || props.numsources || 1, 10)
@@ -632,8 +617,6 @@ const NORMALIZERS = {
       const tsMs = gdeltSeendateToTimestampMs(props.seendate || props.datetime || '')
       out.push(makeEvent({
         id: createEventId(lat, lng, tsMs, 'gdelt-events', name.substring(0, 60)),
-        priority,
-        priority: priority, // legacy compat
         dimension, lat, lng, severity,
         corroborationCount: corrobCount,
         corroborationSources: ['gdelt-events'], ttl: 900,
@@ -667,13 +650,10 @@ const NORMALIZERS = {
       if (seen.has(dedupeKey)) continue
       seen.add(dedupeKey)
 
-      let priority = 'p3'
       let severity = 1
       if (dimension === 'safety') { severity = 2; priority = 'p2' }
       out.push(makeEvent({
         id: createEventId(lat, lng, tsMs, 'gdelt', title || url),
-        priority,
-        priority: priority, // legacy compat
         dimension,
         lat,
         lng,
@@ -701,16 +681,14 @@ const NORMALIZERS = {
       const lng = parseFloat(e.longitude)
       if (isNaN(lat) || isNaN(lng)) return null
       const fatalities = parseInt(e.best) || 0
-      let priority = 'p2', severity = 2
-      if (fatalities >= 100) { priority = 'p1'; severity = 5 }
-      else if (fatalities >= 21) { priority = 'p1'; severity = 4 }
-      else if (fatalities >= 6) { priority = 'p2'; severity = 3 }
-      else if (fatalities >= 1) { priority = 'p2'; severity = 2 }
-      else { priority = 'p3'; severity = 1 }
+      let severity = 2
+      if (fatalities >= 100) { severity = 5 }
+      else if (fatalities >= 21) { severity = 4 }
+      else if (fatalities >= 6) { severity = 3 }
+      else if (fatalities >= 1) { severity = 2 }
+      else { severity = 1 }
       return makeEvent({
         id: createEventId(lat, lng, Date.parse(e.date_start || Date.now()), 'ucdp', e.dyad_name || ''),
-        priority,
-    priority: priority, // legacy compat
  dimension: 'safety', lat, lng, severity,
         corroborationSources: ['ucdp'], ttl: 1800,
         title: `Conflict: ${e.dyad_name || 'Unknown'} — ${e.country || ''}`,
@@ -734,7 +712,6 @@ const NORMALIZERS = {
       if (!lat && !lng) return null
       return makeEvent({
         id: createEventId(lat, lng, Date.parse(f.date?.created || Date.now()), 'reliefweb', f.title || ''),
-        priority: 'p3', dimension: 'people', lat, lng, latApproximate: true,
         severity: 2, corroborationSources: ['reliefweb'], ttl: 5400,
         title: f.title || 'Humanitarian Report',
         detail: f.body ? f.body.substring(0, 300) : '',
@@ -760,9 +737,9 @@ const NORMALIZERS = {
       const pubDate = getXmlTag(item, 'pubDate')
       events.push(makeEvent({
         id: createEventId(46.2, 6.1, Date.parse(pubDate || Date.now()), 'who-don', title),
-        priority: title.toLowerCase().includes('emergency') ? 'p1' : 'p3',
         dimension: 'people', lat: 46.2044, lng: 6.1432, latApproximate: true,
-        severity: title.toLowerCase().includes('emergency') ? 4 : 1,
+        // "Emergency Use Listing" is a regulatory notice, not an outbreak emergency.
+        severity: /\bemergency\b/i.test(title) && !/emergency use/i.test(title) ? 4 : 1,
         corroborationSources: ['who-don'], authoritative: true, ttl: 3600,
         title: title || 'WHO Report',
         detail: description ? description.replace(/<[^>]*>/g, '').substring(0, 300) : '',
@@ -788,7 +765,6 @@ const NORMALIZERS = {
       const pubDate = getXmlTag(item, 'pubDate')
       events.push(makeEvent({
         id: createEventId(42.4, -71.1, Date.parse(pubDate || Date.now()), 'promed', title),
-        priority: 'p3', dimension: 'people', lat: 42.3601, lng: -71.0589, latApproximate: true,
         severity: 1, corroborationSources: ['promed'], ttl: 3600,
         title: title || 'Disease Alert',
         detail: '',
@@ -814,7 +790,6 @@ const NORMALIZERS = {
       const entryId = getXmlTag(entry, 'uid')
       events.push(makeEvent({
         id: createEventId(38.9, -77.0, Date.now(), 'ofac', entryId + name),
-        priority: 'p3', dimension: 'narrative', lat: 38.8951, lng: -77.0364, latApproximate: true,
         severity: 1, corroborationSources: ['ofac-sdn'], authoritative: true, ttl: 86400,
         title: `OFAC Sanction: ${name}`,
         detail: `Sanctions program: ${program || 'Multiple'}`,
@@ -841,7 +816,6 @@ const NORMALIZERS = {
       const desc = getXmlTag(item, 'description')
       events.push(makeEvent({
         id: createEventId(38.9, -77.0, Date.parse(pubDate || Date.now()), 'loc-legal', title),
-        priority: 'p3', dimension: 'narrative', lat: 38.8897, lng: -77.0090, latApproximate: true,
         severity: 1, corroborationSources: ['loc-legal'], ttl: 7200,
         title: title || 'Legal Monitor Update',
         detail: desc ? desc.replace(/<[^>]*>/g, '').substring(0, 300) : '',
@@ -863,7 +837,6 @@ const NORMALIZERS = {
       const minRange = parseFloat(entry.MIN_RNG || entry.min_rng || 0)
       return makeEvent({
         id: createEventId(0, 0, Date.now(), 'celestrak', `${name1}-${name2}`),
-        priority: minRange < 1 ? 'p2' : 'p3',
         dimension: 'narrative', lat: 0, lng: 0, latApproximate: true,
         severity: minRange < 0.5 ? 3 : 1,
         corroborationSources: ['celestrak'], ttl: 3600,
@@ -901,7 +874,6 @@ const NORMALIZERS = {
       const csLabel = callsign || icao24.toUpperCase()
       events.push(makeEvent({
         id: createEventId(0, 0, 0, 'opensky', icao24),
-        priority: mil ? 'p2' : 'p3',
         dimension: 'narrative',
         lat, lng,
         severity: mil ? 2 : 1,
@@ -944,7 +916,6 @@ const NORMALIZERS = {
       const opSuffix = purposeInfo.operator ? ` · ${purposeInfo.operator}` : ''
       return makeEvent({
         id: createEventId(0, 0, 0, 'celestrak-tle', String(noradId)),
-        priority: group === 'stations' ? 'p2' : 'p3',
         dimension: 'environment',
         lat: 0,
         lng: 0,
@@ -971,6 +942,42 @@ const NORMALIZERS = {
     })
   },
 
+  // ── Live cameras (Windy + TfL + Caltrans via /api/cameras) ──
+
+  cameras: (data) => {
+    const list = data?.cameras
+    if (!Array.isArray(list) || list.length === 0) return []
+    return list.slice(0, 500).map((cam) => {
+      const provider = cam.provider || 'camera'
+      const providerLabel =
+        provider === 'windy' ? 'Windy Webcams'
+          : provider === 'tfl' ? 'TfL JamCams'
+            : provider === 'caltrans' ? 'Caltrans CCTV'
+              : 'Live Camera'
+      const place = [cam.city, cam.country].filter(Boolean).join(', ')
+      return makeEvent({
+        id: createEventId(cam.lat, cam.lng, 0, 'cameras', cam.id),
+        dimension: 'narrative',
+        lat: cam.lat,
+        lng: cam.lng,
+        // severity 2 so opt-in cameras remain visible at world zoom (lod declutter)
+        severity: 2,
+        corroborationSources: ['cameras'],
+        ttl: 600,
+        title: cam.title || 'Live camera',
+        detail: [providerLabel, place].filter(Boolean).join(' · '),
+        source: providerLabel,
+        sourceUrl: cam.pageUrl || cam.playerUrl || cam.streamUrl || '',
+        tags: ['camera', 'cctv', provider].filter(Boolean),
+        locationName: place || undefined,
+        imageUrl: cam.imageUrl || '',
+        playerUrl: cam.playerUrl || '',
+        streamUrl: cam.streamUrl || '',
+        cameraProvider: provider,
+      })
+    })
+  },
+
   // ── Phase 3: AISStream vessel positions ($0 free tier — server WebSocket proxy) ──
 
   aisstream: (data) => {
@@ -983,7 +990,6 @@ const NORMALIZERS = {
       const name = (v.shipName || '').trim() || `MMSI ${mmsi}`
       return makeEvent({
         id: createEventId(v.lat, v.lng, Date.now(), 'aisstream', mmsi),
-        priority: 'p3',
         dimension: 'economy',
         lat: v.lat,
         lng: v.lng,
@@ -1022,7 +1028,6 @@ const NORMALIZERS = {
       const sev = /hurricane|typhoon/i.test(cat) ? 4 : /storm/i.test(cat) ? 3 : 2
       return makeEvent({
         id: createEventId(centerLat, centerLng, Date.now(), 'noaa-nhc', s.stormId || s.name),
-        priority: sev >= 4 ? 'p1' : 'p2',
         dimension: 'environment',
         lat: centerLat,
         lng: centerLng,
@@ -1054,7 +1059,6 @@ const NORMALIZERS = {
       if (windSpeed > 80) {
         events.push(makeEvent({
           id: createEventId(data.latitude, data.longitude, Date.now(), 'open-meteo', `Wind ${windSpeed}`),
-          priority: windSpeed > 120 ? 'p1' : 'p2',
           dimension: 'environment', lat: data.latitude, lng: data.longitude,
           severity: windSpeed > 120 ? 4 : 2,
           corroborationSources: ['open-meteo'], ttl: 1200,
@@ -1092,13 +1096,11 @@ const NORMALIZERS = {
       if (isNaN(lat) || isNaN(lng)) return null
       const conf = cols[confIdx] || 'nominal'
       const frp = parseFloat(cols[frpIdx]) || 0
-      let priority = 'p3', severity = 1
-      if (frp > 100) { priority = 'p2'; severity = 3 }
-      if (conf === 'high' || frp > 500) { priority = 'p2'; severity = 4 }
+      let severity = 1
+      if (frp > 100) { severity = 3 }
+      if (conf === 'high' || frp > 500) { severity = 4 }
       return makeEvent({
         id: createEventId(lat, lng, Date.now(), 'firms', `fire-${lat.toFixed(2)}-${lng.toFixed(2)}`),
-        priority,
-    priority: priority, // legacy compat
  dimension: 'environment', lat, lng, severity,
         corroborationSources: ['firms'], authoritative: true, ttl: 600,
         title: `Active Fire — FRP ${Math.round(frp)} MW`,
@@ -1119,7 +1121,6 @@ const NORMALIZERS = {
       if (['EUR', 'GBP', 'JPY', 'CNY'].includes(currency)) {
         events.push(makeEvent({
           id: createEventId(40.7, -74.0, Date.now(), 'finnhub', `${base}/${currency}`),
-          priority: 'p3', dimension: 'economy', lat: 40.7128, lng: -74.006, latApproximate: true,
           severity: 1, corroborationSources: ['finnhub'], ttl: 900,
           title: `FX: ${base}/${currency} = ${rate.toFixed(4)}`,
           detail: `Exchange rate snapshot.`,
@@ -1140,7 +1141,6 @@ const NORMALIZERS = {
     if (isNaN(val)) return []
     return [makeEvent({
       id: createEventId(38.6, -90.2, Date.now(), 'fred', `${data.id || 'FRED'} ${val}`),
-      priority: 'p3', dimension: 'economy', lat: 38.627, lng: -90.1994, latApproximate: true,
       severity: 1, corroborationSources: ['fred'], ttl: 3600,
       title: `FRED: ${data.id || 'Economic Indicator'} = ${val}`,
       detail: `Latest observation: ${latest.date} = ${val}`,
@@ -1159,7 +1159,6 @@ const NORMALIZERS = {
     if (isNaN(price)) return []
     return [makeEvent({
       id: createEventId(29.8, -95.4, Date.now(), 'eia', `Oil $${price}`),
-      priority: price > 100 ? 'p2' : 'p3',
       dimension: 'economy', lat: 29.7604, lng: -95.3698, latApproximate: true,
       severity: price > 100 ? 2 : 1,
       corroborationSources: ['eia'], ttl: 3600,
@@ -1178,7 +1177,6 @@ const NORMALIZERS = {
       for (const entry of (summary.top || []).slice(0, 5)) {
         events.push(makeEvent({
           id: createEventId(37.8, -122.4, Date.now(), 'cloudflare', entry.name || ''),
-          priority: 'p2', dimension: 'safety', lat: 37.7749, lng: -122.4194, latApproximate: true,
           severity: 2, corroborationSources: ['cloudflare'], ttl: 600,
           title: `L7 Attack: ${entry.name || 'DDoS Activity'}`,
           detail: `Cloudflare Radar DDoS activity detected.`,
@@ -1195,7 +1193,6 @@ const NORMALIZERS = {
     return data.data.slice(0, 10).map(entry => {
       return makeEvent({
         id: createEventId(0, 0, Date.now(), 'abuseipdb', entry.ipAddress || ''),
-        priority: entry.abuseConfidenceScore > 90 ? 'p2' : 'p3',
         dimension: 'safety', lat: 0, lng: 0, latApproximate: true,
         severity: entry.abuseConfidenceScore > 90 ? 3 : 1,
         corroborationSources: ['abuseipdb'], ttl: 600,
@@ -1219,7 +1216,6 @@ const NORMALIZERS = {
       const isICS = m.port === 502 || m.port === 102 || m.port === 44818
       return makeEvent({
         id: createEventId(lat, lng, Date.now(), 'shodan', `${m.ip_str}:${m.port}`),
-        priority: isICS ? 'p2' : 'p3',
         dimension: 'safety', lat, lng, latApproximate: !m.location?.latitude,
         severity: isICS ? 3 : 1,
         corroborationSources: ['shodan'], ttl: 1800,
@@ -1238,7 +1234,6 @@ const NORMALIZERS = {
       const isHigh = val > 300
       return makeEvent({
         id: createEventId(m.latitude, m.longitude, Date.now(), 'safecast', `rad-${val}`),
-        priority: isHigh ? 'p1' : val > 100 ? 'p2' : 'p3',
         dimension: 'environment', lat: m.latitude || 0, lng: m.longitude || 0,
         severity: isHigh ? 4 : val > 100 ? 3 : 1,
         corroborationSources: ['safecast'], ttl: 1800,
@@ -1256,7 +1251,6 @@ const NORMALIZERS = {
     if (fossilPct < 80) return []
     return [makeEvent({
       id: createEventId(51.2, 10.4, Date.now(), 'elecmaps', `fossil-${fossilPct}`),
-      priority: 'p3', dimension: 'narrative', lat: 51.1657, lng: 10.4515, latApproximate: true,
       severity: 1, corroborationSources: ['electricity-maps'], ttl: 1800,
       title: `Grid Stress: ${fossilPct.toFixed(0)}% fossil fuel`,
       detail: `Power grid running ${fossilPct.toFixed(1)}% on fossil fuels.`,
@@ -1276,7 +1270,6 @@ const NORMALIZERS = {
       const sev = engagement > 50 ? 3 : engagement > 10 ? 2 : 1
       return makeEvent({
         id: createEventId(p.lat, p.lng, new Date(ts).getTime(), 'bluesky', p.uri || p.text?.slice(0, 40)),
-        priority: sev >= 3 ? 'p2' : 'p3',
         dimension: 'narrative',
         lat: p.lat,
         lng: p.lng,
@@ -1312,7 +1305,6 @@ const NORMALIZERS = {
       const isHighPriority = /false|misleading|pants|incorrect|debunked/i.test(c.rating || '')
       return makeEvent({
         id: createEventId(c.lat, c.lng, new Date(ts).getTime(), 'fact-check', c.claim?.slice(0, 40)),
-        priority: isHighPriority ? 'p2' : 'p3',
         dimension: 'narrative',
         lat: c.lat,
         lng: c.lng,
@@ -1446,6 +1438,12 @@ const SOURCE_CONFIGS = {
     format: 'json',
     pollInterval: 45_000,
   },
+  // Live cameras — Windy (keyed) + TfL + Caltrans via same-origin proxy
+  cameras: {
+    url: '/api/cameras',
+    format: 'json',
+    pollInterval: 300_000,
+  },
   // Phase 3 — NOAA NHC active storm tracks + cone-of-error ($0, no key — worker fetches direct)
   'noaa-nhc': {
     format: 'json',
@@ -1559,11 +1557,11 @@ function tagStaleEvents(events, stale) {
 }
 
 function emitCachedSnapshot(sourceId, row, stale = true) {
-  const events = tagStaleEvents(row.events || [], stale)
+  const events = tagStaleEvents(filterToAtlasCycle(row.events || []), stale)
   if (!events.length && !row.aggregates) return
 
   lastGoodPayload[sourceId] = {
-    events: row.events || [],
+    events: filterToAtlasCycle(row.events || []),
     aggregates: row.aggregates,
     fetchedAt: row.fetchedAt || Date.now(),
   }
@@ -1683,7 +1681,7 @@ async function hydrateFromCache(sourceIds) {
 function startPollingSources(sourceIds) {
   const allConfigs = getAllConfigs()
   const prioritySet = new Set(PRIORITY_FETCH_SOURCES)
-  const priority = PRIORITY_FETCH_SOURCES.filter((id) => sourceIds.includes(id))
+  PRIORITY_FETCH_SOURCES.filter((id) => sourceIds.includes(id))
   const rest = sourceIds.filter((id) => !prioritySet.has(id))
 
   for (const id of priority) {
@@ -1727,7 +1725,6 @@ async function fetchSource(sourceId) {
         const ts = Date.now()
         events.push(makeEvent({
           id: createEventId(centroid.lat, centroid.lng, ts, 'gdelt-vgkg', key),
-          priority: 'p3',
           dimension: 'narrative',
           lat: centroid.lat,
           lng: centroid.lng,
@@ -1789,11 +1786,9 @@ async function fetchSource(sourceId) {
           ? row._exportTsMs
           : Date.now()
         const sev = Math.min(5, Math.max(1, row.severity || 1))
-        const priority = sev >= 4 ? 'p1' : sev >= 2 ? 'p2' : 'p3'
+        sev >= 4 ? 'p1' : sev >= 2 ? 'p2' : 'p3'
         return makeEvent({
           id: createEventId(row.lat, row.lng, ts, 'gdelt-cameo', row.title),
-          priority,
-          priority: priority, // legacy compat
           dimension: row.dimension,
           lat: row.lat,
           lng: row.lng,
@@ -1935,7 +1930,10 @@ async function fetchSource(sourceId) {
         const controller = new AbortController()
         const timer = setTimeout(() => controller.abort(), GDELT_LEG_TIMEOUT_MS)
         try {
-          const chunk = await fetchGdeltJson(docUrl, { signal: controller.signal })
+          const chunk = await fetchGdeltJson(docUrl, {
+            signal: controller.signal,
+            priority: 'background',
+          })
           for (const a of chunk?.articles || []) {
             merged.articles.push({ ...a, _atlasDimensionHint: dimension })
           }
@@ -1970,7 +1968,10 @@ async function fetchSource(sourceId) {
         const controller = new AbortController()
         const timer = setTimeout(() => controller.abort(), GDELT_LEG_TIMEOUT_MS)
         try {
-          const text = await fetchGdeltText(geoUrl, { signal: controller.signal })
+          const text = await fetchGdeltText(geoUrl, {
+            signal: controller.signal,
+            priority: 'background',
+          })
           const chunk = JSON.parse(text)
           for (const f of chunk.features || []) {
             const props = f.properties || {}
@@ -2106,6 +2107,7 @@ async function pollSource(sourceId) {
   let servedStale = false
 
   if (events.length > 0) {
+    events = filterToAtlasCycle(events)
     const extras = state.lastAggregates
       ? { aggregates: state.lastAggregates, totalRows: state.lastTotalRows || 0 }
       : {}
@@ -2115,14 +2117,18 @@ async function pollSource(sourceId) {
       state.lastAggregates = null
       state.lastTotalRows = 0
     }
-    self.postMessage({ type: 'EVENTS', sourceId, events })
+    if (events.length) {
+      self.postMessage({ type: 'EVENTS', sourceId, events })
+    }
   } else if (lastGoodPayload[sourceId]?.events?.length) {
     const age = Date.now() - (lastGoodPayload[sourceId].fetchedAt || 0)
     const canStale = !LIVE_TRACK_SOURCES.has(sourceId) || age < LIVE_TRACK_MAX_AGE_MS
     if (canStale) {
-      events = tagStaleEvents(lastGoodPayload[sourceId].events, true)
-      servedStale = true
-      self.postMessage({ type: 'EVENTS', sourceId, events, fromCache: true })
+      events = tagStaleEvents(filterToAtlasCycle(lastGoodPayload[sourceId].events), true)
+      if (events.length) {
+        servedStale = true
+        self.postMessage({ type: 'EVENTS', sourceId, events, fromCache: true })
+      }
     }
   }
 

@@ -5,7 +5,7 @@
  */
 
 import { HAZARD_TYPES, HAZARD_BORDER_SHAPE as BORDER_SHAPE } from './environmentHazardClassifier.js'
-import wildfireSvgRaw from '../../public/wild fire icon.svg?raw'
+import wildfireSvgRaw from '../assets/wildfire-icon.svg?raw'
 
 export { HAZARD_TYPES } from './environmentHazardClassifier.js'
 export { classifyEnvironmentHazard, resolveHazardType } from './environmentHazardClassifier.js'

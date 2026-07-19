@@ -1,9 +1,7 @@
-import { useEffect, useState, useRef, useCallback, useMemo, lazy, Suspense, Component } from 'react'
+import { useEffect, useState, useCallback, useMemo, lazy, Suspense, Component } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useAtlasStore } from './store/atlasStore'
 import { useNewsData } from './hooks/useNewsData'
-import Onboarding from './components/Onboarding/Onboarding'
-import CesiumStarfieldBackground from './components/Onboarding/CesiumStarfieldBackground'
 import Header from './components/UI/Header'
 import Inspector from './components/Inspector/Inspector'
 import Workbench from './components/Workbench/Workbench'
@@ -12,9 +10,7 @@ import HoverLabel from './components/UI/HoverLabel'
 import StreetViewOverlay from './components/UI/StreetViewOverlay'
 import YouTubeEmbedOverlay from './components/UI/YouTubeEmbedOverlay'
 import FetchStatusOverlay from './components/UI/FetchStatusOverlay'
-import AtlasBootstrapOverlay from './components/UI/AtlasBootstrapOverlay'
 import { usePreferencesSync } from './hooks/usePreferencesSync'
-import useAtlasBootstrap from './hooks/useAtlasBootstrap'
 import useLandmarkPresets from './hooks/useLandmarkPresets'
 import useAtlasUrlSync from './hooks/useAtlasUrlSync'
 import useWatchlistAlerts from './hooks/useWatchlistAlerts'
@@ -22,8 +18,8 @@ import useSurgeAlerts from './hooks/useSurgeAlerts'
 import useAlertDispatch from './hooks/useAlertDispatch'
 import useWorkspaceEventCapture from './hooks/useWorkspaceEventCapture'
 import ToastHost from './components/UI/ToastHost'
-import PlaceIndicatorStrip from './components/UI/PlaceIndicatorStrip'
-import FieldLegendPill from './components/Globe/FieldLegendPill'
+import CountryContextMenu from './components/UI/CountryContextMenu'
+import GlobeLegend from './components/UI/GlobeLegend'
 import { supabase } from './services/supabase'
 import { loadCountryPolygons } from './services/countryIndex'
 import { LANDMARK_SHORTCUT_KEYS } from './config/landmarkPresets'
@@ -31,13 +27,11 @@ import LandingPage from './components/Landing/LandingPage'
 import WorkspaceDashboard from './components/Workspace/WorkspaceDashboard'
 import WorkspaceTimeline from './components/Workspace/WorkspaceTimeline'
 
-// Lazy-load heavy 3D components — Google Map3D / globe.gl / Leaflet are loaded after onboarding.
+// Lazy-load heavy 3D components — Google Map3D / globe.gl / Leaflet load after landing.
 const GoogleGlobe = lazy(() => import('./components/Globe/GoogleGlobe'))
 const GlobeGLView = lazy(() => import('./components/Globe/GlobeGLView'))
 const FlatMap = lazy(() => import('./components/Globe/FlatMap'))
 const ParticleEarthTransition = lazy(() => import('./components/Transition/ParticleEarthTransition'))
-
-const SUN_ANGLE_THROTTLE_MS = 50
 
 class GlobeLoadErrorBoundary extends Component {
   constructor(props) {
@@ -70,10 +64,9 @@ export default function App() {
   const landingAcknowledged = useAtlasStore((s) => s.landingAcknowledged)
   const launchTransitionActive = useAtlasStore((s) => s.launchTransitionActive)
   const [hudHidden, setHudHidden] = useState(false)
-  const [sunAngle, setSunAngle] = useState(0)
   const [globeReady, setGlobeReady] = useState(false)
-  const lastSunAngleRef = useRef(0)
   const globeMode = useAtlasStore((s) => s.globeMode)
+  const launchWithAllSources = useAtlasStore((s) => s.launchWithAllSources)
   const tacticalMode = useAtlasStore((s) => s.tacticalMode)
   const user = useAtlasStore((s) => s.user)
   const appView = useAtlasStore((s) => s.appView)
@@ -106,6 +99,19 @@ export default function App() {
   const showDashboard = onGlobeView && user && appView === 'dashboard'
   const showGlobeWorkstation = onGlobeView && !showDashboard
   const inWorkspace = showGlobeWorkstation && Boolean(activeWorkspaceId)
+  const mobileMode = useAtlasStore((s) => s.mobileMode)
+  const inspectorType = useAtlasStore((s) => s.ui.inspector?.type)
+
+  // Country context-menu panels live in the HUD inspector — reveal HUD if needed.
+  useEffect(() => {
+    if (
+      inspectorType === 'economy' ||
+      inspectorType === 'countryNews' ||
+      inspectorType === 'weather'
+    ) {
+      setHudHidden(false)
+    }
+  }, [inspectorType])
 
   useEffect(() => {
     loadCountryPolygons().catch(() => {})
@@ -169,18 +175,18 @@ export default function App() {
 
   const showLandingLayer = !landingAcknowledged
 
-  const { ready: bootstrapReady, steps: bootstrapSteps, progress: bootstrapProgress, hasFailures: bootstrapHasFailures, timedOut: bootstrapTimedOut } = useAtlasBootstrap(globeReady, onGlobeView)
   const { flyToLandmark } = useLandmarkPresets()
-
-  const showStarfield =
-    showLandingLayer ||
-    !hasCompletedOnboarding ||
-    launchTransitionActive ||
-    (onGlobeView && !bootstrapReady)
 
   useEffect(() => {
     if (!onGlobeView) setGlobeReady(false)
   }, [onGlobeView])
+
+  // Safety net: if landing was dismissed but launch never started, enter the globe.
+  useEffect(() => {
+    if (landingAcknowledged && !hasCompletedOnboarding && !launchTransitionActive) {
+      launchWithAllSources()
+    }
+  }, [landingAcknowledged, hasCompletedOnboarding, launchTransitionActive, launchWithAllSources])
 
   // Warm data workers as soon as the user enters the app (landing / transition / globe).
   useEffect(() => {
@@ -188,14 +194,6 @@ export default function App() {
       initEventBusSystem()
     }
   }, [landingAcknowledged, launchTransitionActive, onGlobeView]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const onSunAngle = useCallback((angleRad) => {
-    const now = Date.now()
-    if (now - lastSunAngleRef.current >= SUN_ANGLE_THROTTLE_MS) {
-      lastSunAngleRef.current = now
-      setSunAngle(angleRad)
-    }
-  }, [])
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -248,16 +246,10 @@ export default function App() {
 
   return (
     <>
-      {/* Persistent starfield: same instance from setup through transition. Never unmounts until globe. */}
-      {showStarfield && (
-        <div className="fixed inset-0 z-0" aria-hidden>
-          <CesiumStarfieldBackground onSunAngle={onSunAngle} />
-        </div>
-      )}
       <AnimatePresence mode="wait">
         {showLandingLayer ? (
           <LandingPage key="atlas-landing" />
-        ) : launchTransitionActive ? (
+        ) : launchTransitionActive || !hasCompletedOnboarding ? (
           <motion.div
             key="transition"
             initial={{ opacity: 0 }}
@@ -266,20 +258,13 @@ export default function App() {
             transition={{ duration: 0.3 }}
             className="fixed inset-0 z-10"
           >
-            <Suspense fallback={null}>
+            <Suspense fallback={
+              <div className="fixed inset-0 flex items-center justify-center text-xs uppercase tracking-widest text-slate-500">
+                Launching…
+              </div>
+            }>
               <ParticleEarthTransition />
             </Suspense>
-          </motion.div>
-        ) : !hasCompletedOnboarding ? (
-          <motion.div
-            key="onboarding"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.8 }}
-            className="fixed inset-0 z-50"
-          >
-            <Onboarding sunAngle={sunAngle} />
           </motion.div>
         ) : showDashboard ? (
           <motion.div
@@ -297,12 +282,12 @@ export default function App() {
             key="globe-view"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            transition={{ duration: 1.2, delay: 0.2 }}
+            transition={{ duration: 0.45 }}
             className={`fixed inset-0${tacticalMode ? ' atlas-tactical-mode' : ''}${inWorkspace ? ' atlas-workstation-mode' : ''}`}
           >
             <GlobeLoadErrorBoundary>
               <Suspense fallback={
-                <div className="fixed inset-0 z-10 flex items-center justify-center text-xs uppercase tracking-widest text-slate-500">
+                <div className="atlas-globe-loading-backdrop fixed inset-0 z-10 flex items-center justify-center text-xs uppercase tracking-widest text-slate-500">
                   Loading globe…
                 </div>
               }>
@@ -315,15 +300,9 @@ export default function App() {
                 )}
               </Suspense>
             </GlobeLoadErrorBoundary>
-            <AtlasBootstrapOverlay
-              visible={!bootstrapReady}
-              steps={bootstrapSteps}
-              progress={bootstrapProgress}
-              hasFailures={bootstrapHasFailures}
-              timedOut={bootstrapTimedOut}
-            />
+            {globeReady && <CountryContextMenu />}
             <AnimatePresence>
-              {bootstrapReady && !hudHidden && (
+              {globeReady && !hudHidden && (
                 <motion.div
                   key="hud-layer"
                   initial={{ opacity: 0 }}
@@ -337,15 +316,14 @@ export default function App() {
                     inWorkspace={inWorkspace}
                   />
                   {inWorkspace && <WorkspaceTimeline />}
-                  <PlaceIndicatorStrip hidden={hudHidden} />
 
                   <Inspector />
                   <Workbench />
                   <StreetViewOverlay />
                   <YouTubeEmbedOverlay />
                   <HoverLabel />
-                  <FieldLegendPill />
                   <LiveTicker />
+                  {!mobileMode && <GlobeLegend />}
                   <FetchStatusOverlay />
                   <ToastHost />
                 </motion.div>

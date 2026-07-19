@@ -26,7 +26,7 @@ export async function fetchGdeltGeoJson(query, mode, { timespan = '1440min', max
     timespan,
     maxpoints: isPointMode && maxpoints != null ? Number(maxpoints) : null,
   })
-  const text = await fetchGdeltText(url, { signal })
+  const text = await fetchGdeltText(url, { signal, priority: 'interactive' })
   return JSON.parse(text)
 }
 

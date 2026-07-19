@@ -1,19 +1,27 @@
 /**
- * Inspector content — intel event detail (former EventPanel body).
- * Keeps EventTimeline, CausalThread, stretch signals, and corroboration display.
+ * Inspector content — intel event detail, trust-first layout.
+ * Order answers the analyst's questions top-to-bottom:
+ *   what (dimension + title) → where from (provenance) → how sure (trust block)
+ *   → detail → context (timeline, causal thread, stretch signals) → actions.
  */
+import { X, ExternalLink, Eye, Radar, BookOpen, Plus } from 'lucide-react'
 import { useAtlasStore } from '../../store/atlasStore'
-import {
-  DIMENSION_COLORS, DIMENSION_LABELS,
-  PRIORITY_LABELS, formatToneScore,
-} from '../../core/eventSchema'
+import { formatToneScore } from '../../core/eventSchema'
 import CausalThread from '../UI/CausalThread'
 import EventTimeline from '../UI/EventTimeline'
 import StretchSignalsPanel from '../UI/StretchSignalsPanel'
 import { buildGdeltDocQuery } from '../../services/gdelt/analyticsService'
 import { confidenceForEvent } from '../../core/triage'
-import { classifySatellitePurpose, SATELLITE_PURPOSE_META } from '../../core/satellitePurpose'
+import { classifySatellitePurpose } from '../../core/satellitePurpose'
 import { loadCountryIndex, findCountry } from '../../services/countryIndex'
+import { cleanEventText, timeAgoLabel } from '../../utils/text.js'
+import { PriorityBadge } from '../ui/badge.jsx'
+import { ProvenanceChip } from '../ui/provenance-chip.jsx'
+import { TrustMeter } from '../ui/trust-meter.jsx'
+import {
+  InspectorWindowControls,
+  useInspectorWindow,
+} from './InspectorWindowContext'
 
 /** Phase 5 — resolve this event to a country and open its Dossier. */
 async function openEventDossier(event) {
@@ -36,23 +44,33 @@ async function openEventDossier(event) {
   }
 }
 
-const IconStreetView = () => (
-  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="12" cy="5" r="3" />
-    <line x1="12" y1="8" x2="12" y2="16" />
-    <path d="M6 16l6 4 6-4" />
-  </svg>
-)
+function CloseButton({ onClose }) {
+  const windowApi = useInspectorWindow()
+  if (windowApi) {
+    return <InspectorWindowControls className="event-panel-window-controls" />
+  }
+  return (
+    <button
+      className="feed-close-btn"
+      onClick={onClose}
+      aria-label="Close inspector"
+      style={{ marginLeft: 8, flexShrink: 0 }}
+    >
+      <X size={13} />
+    </button>
+  )
+}
 
-function timeAgo(dateStr) {
-  if (!dateStr) return ''
-  const diff = Date.now() - new Date(dateStr).getTime()
-  const minutes = Math.floor(diff / 60000)
-  if (minutes < 1) return 'now'
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  return `${Math.floor(hours / 24)}d ago`
+function EventPanelHeader({ children }) {
+  const windowApi = useInspectorWindow()
+  return (
+    <div
+      className={`event-panel-header${windowApi ? ' inspector-panel__drag-header' : ''}`}
+      onPointerDown={windowApi?.onDragHandlePointerDown}
+    >
+      {children}
+    </div>
+  )
 }
 
 export default function EventContent({ event, onClose }) {
@@ -71,7 +89,7 @@ export default function EventContent({ event, onClose }) {
   if (inspectorMode === 'reference') {
     return (
       <>
-        <div className="event-panel-header">
+        <EventPanelHeader>
           <div style={{ flex: 1 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span className="atlas-archetype-chip atlas-archetype-chip--reference">Reference</span>
@@ -84,12 +102,22 @@ export default function EventContent({ event, onClose }) {
               {event.region ? ` · ${event.region}` : ''}
             </div>
           </div>
-          <button className="feed-close-btn" onClick={onClose} style={{ marginLeft: 8, flexShrink: 0 }}>✕</button>
-        </div>
+          <CloseButton onClose={onClose} />
+        </EventPanelHeader>
         <div className="event-panel-body">
           <div className="atlas-inspector-disclaimer">
             Static context — not a live event. Reference markers are never scored for corroboration.
           </div>
+          {event.description && (
+            <div className="event-meta-grid" style={{ marginBottom: 12 }}>
+              <div className="event-meta-item" style={{ gridColumn: '1 / -1' }}>
+                <span className="event-meta-label">Site purpose</span>
+                <span className="event-meta-value" style={{ whiteSpace: 'normal', lineHeight: 1.45 }}>
+                  {event.description}
+                </span>
+              </div>
+            </div>
+          )}
           <div className="event-meta-grid">
             <div className="event-meta-item">
               <span className="event-meta-label">Coordinates</span>
@@ -106,7 +134,7 @@ export default function EventContent({ event, onClose }) {
     const linked = (event.linkedEventIds || []).map((id) => eventMap[id]).filter(Boolean)
     return (
       <>
-        <div className="event-panel-header">
+        <EventPanelHeader>
           <div style={{ flex: 1 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span className="atlas-archetype-chip atlas-archetype-chip--derived">Derived</span>
@@ -115,8 +143,8 @@ export default function EventContent({ event, onClose }) {
             <h3 className="event-panel-title">{event.title || 'Synthesized signal'}</h3>
             <div className="event-panel-attribution">{event.anomalyType || 'Cross-feed synthesis'}</div>
           </div>
-          <button className="feed-close-btn" onClick={onClose} style={{ marginLeft: 8, flexShrink: 0 }}>✕</button>
-        </div>
+          <CloseButton onClose={onClose} />
+        </EventPanelHeader>
         <div className="event-panel-body">
           <div className="atlas-derived-why">
             <span className="event-meta-label">Why</span>
@@ -154,51 +182,60 @@ export default function EventContent({ event, onClose }) {
   }
 
   const confidence = confidenceForEvent(event)
+  const title = cleanEventText(event.title)
+  const detail = cleanEventText(event.detail)
 
   return (
     <>
-      <div className="event-panel-header">
-        <div style={{ flex: 1 }}>
-          {/* Dimension badge — color-coded circle + civilian label */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <EventPanelHeader>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {/* What kind of object + what domain + how urgent */}
+          <div className="flex flex-wrap items-center gap-1.5">
             {event.trackKind ? (
               <span className="atlas-archetype-chip atlas-archetype-chip--track">Live telemetry</span>
             ) : (
               <span className="atlas-archetype-chip atlas-archetype-chip--pin">Incident pin</span>
             )}
-            <span
-              className="event-dimension-badge"
-              style={{
-                '--dim-color': DIMENSION_COLORS[event.dimension] || '#378ADD',
-              }}
-            >
-              <span
-                className="event-dimension-dot"
-                style={{ backgroundColor: DIMENSION_COLORS[event.dimension] }}
-              />
-              {DIMENSION_LABELS[event.dimension] || event.dimension}
-            </span>
-            <span className={`event-priority-indicator event-priority-${event.priority}`}>
-              {PRIORITY_LABELS[event.priority] || event.priority?.toUpperCase()}
-            </span>
+            <PriorityBadge priority={event.priority} />
           </div>
-          {/* Headline — raw from source, unedited */}
-          <h3 className="event-panel-title">{event.title}</h3>
-          {/* Source attribution + timestamp */}
-          <div className="event-panel-attribution">
-            {event.source} · {timeAgo(event.timestamp)}
+
+          {/* Headline — decoded, tags stripped */}
+          <h3 className="event-panel-title">{title}</h3>
+
+          {/* Provenance — source + freshness + precision-tier dot */}
+          <div className="mt-1.5">
+            <ProvenanceChip event={event} />
           </div>
         </div>
-        <button
-          className="feed-close-btn"
-          onClick={onClose}
-          style={{ marginLeft: 8, flexShrink: 0 }}
-        >
-          ✕
-        </button>
-      </div>
+        <CloseButton onClose={onClose} />
+      </EventPanelHeader>
 
       <div className="event-panel-body">
+        {/* ── Trust block — "how sure are we?" answered first ── */}
+        <div className="rounded-md border border-line bg-surface px-2.5 py-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <TrustMeter event={event} />
+            <span className={`confidence-badge tone-${confidence.tone}`}>{confidence.label}</span>
+          </div>
+          {(event.corroborationScore ?? 0) > 0 && (
+            <div
+              className="mt-1.5 font-data text-[10px] leading-normal text-muted"
+              title="Corroboration score — distinct feeds, module diversity, time spread"
+            >
+              Corroboration score {Math.round((event.corroborationScore ?? 0) * 100)}%
+            </div>
+          )}
+          {confidence.sources.length > 0 && (
+            <div
+              className="mt-1 truncate font-data text-[10px] leading-normal text-faint"
+              title={confidence.sources.join(', ')}
+            >
+              {confidence.sources.slice(0, 5).join(' · ')}
+              {confidence.sources.length > 5 ? ` +${confidence.sources.length - 5} more` : ''}
+            </div>
+          )}
+        </div>
+
         <div className="event-meta-grid">
           <div className="event-meta-item">
             <span className="event-meta-label">Severity</span>
@@ -207,49 +244,18 @@ export default function EventContent({ event, onClose }) {
                 <div
                   key={n}
                   className={`event-severity-pip ${n <= event.severity ? 'active' : ''}`}
-                  style={n <= event.severity ? { '--pip-color': DIMENSION_COLORS[event.dimension] } : {}}
+                  style={n <= event.severity ? { backgroundColor: event.color } : undefined}
                 />
               ))}
             </div>
           </div>
 
-          <div className="event-meta-item" style={{ gridColumn: '1 / -1' }}>
-            <span className="event-meta-label">Corroboration</span>
-            <span className="event-meta-value" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
-              <span className={`confidence-badge tone-${confidence.tone}`}>
-                {confidence.label}
-              </span>
-              {(event.corroborationScore ?? 0) > 0 && (
-                <span
-                  className="source-badge-auth"
-                  title={`Corroboration score ${Math.round((event.corroborationScore ?? 0) * 100)}% — distinct feeds, module diversity, time spread`}
-                >
-                  {Math.round((event.corroborationScore ?? 0) * 100)}%
-                </span>
-              )}
-              {event.authoritative && (
-                <span className="source-badge-auth">AUTH</span>
-              )}
-            </span>
-            {confidence.sources.length > 0 && (
-              <span
-                style={{
-                  display: 'block',
-                  marginTop: 3,
-                  fontFamily: 'var(--font-data)',
-                  fontSize: '9.5px',
-                  color: 'var(--text-muted)',
-                  opacity: 0.75,
-                }}
-                title={confidence.sources.join(', ')}
-              >
-                {confidence.sources.slice(0, 5).join(' · ')}
-                {confidence.sources.length > 5 ? ` +${confidence.sources.length - 5} more` : ''}
-              </span>
-            )}
+          <div className="event-meta-item">
+            <span className="event-meta-label">Time</span>
+            <span className="event-meta-value">{timeAgoLabel(event.timestamp)}</span>
           </div>
 
-          <div className="event-meta-item">
+          <div className="event-meta-item" style={{ gridColumn: '1 / -1' }}>
             <span className="event-meta-label">Coordinates</span>
             <span className="event-meta-value">
               {event.latApproximate ? '≈ ' : ''}
@@ -260,11 +266,6 @@ export default function EventContent({ event, onClose }) {
                 </span>
               )}
             </span>
-          </div>
-
-          <div className="event-meta-item">
-            <span className="event-meta-label">Time</span>
-            <span className="event-meta-value">{timeAgo(event.timestamp)}</span>
           </div>
 
           {/* GDELT tone score — "Global coverage tone" */}
@@ -285,8 +286,72 @@ export default function EventContent({ event, onClose }) {
           )}
         </div>
 
-        {event.detail && (
-          <p className="event-detail-text">{event.detail}</p>
+        {detail && (
+          <p className="event-detail-text">{detail}</p>
+        )}
+
+        {(event.imageUrl || event.playerUrl || event.streamUrl) && event.tags?.includes('camera') && (
+          <div className="rounded-md border border-line bg-surface overflow-hidden">
+            {event.imageUrl ? (
+              <a
+                href={event.playerUrl || event.streamUrl || event.sourceUrl || event.imageUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Open live view"
+              >
+                <img
+                  src={event.imageUrl}
+                  alt={title || 'Live camera'}
+                  loading="lazy"
+                  referrerPolicy="no-referrer"
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    maxHeight: 200,
+                    objectFit: 'cover',
+                    background: 'rgba(0,0,0,0.35)',
+                  }}
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none'
+                  }}
+                />
+              </a>
+            ) : null}
+            <div className="event-meta-grid" style={{ padding: '8px 10px', marginTop: 0 }}>
+              {event.cameraProvider && (
+                <div className="event-meta-item">
+                  <span className="event-meta-label">Provider</span>
+                  <span className="event-meta-value">{event.cameraProvider}</span>
+                </div>
+              )}
+              {event.streamUrl && (
+                <div className="event-meta-item" style={{ gridColumn: '1 / -1' }}>
+                  <a
+                    href={event.streamUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="event-source-link"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                  >
+                    <ExternalLink size={11} /> Open stream
+                  </a>
+                </div>
+              )}
+              {event.playerUrl && !event.streamUrl && (
+                <div className="event-meta-item" style={{ gridColumn: '1 / -1' }}>
+                  <a
+                    href={event.playerUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="event-source-link"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                  >
+                    <ExternalLink size={11} /> Open player
+                  </a>
+                </div>
+              )}
+            </div>
+          </div>
         )}
 
         {event.trackKind === 'aircraft' && (
@@ -337,7 +402,6 @@ export default function EventContent({ event, onClose }) {
                 label: event.satellitePurposeLabel,
                 detail: event.satellitePurposeDetail,
                 operator: event.satelliteOperator,
-                icon: SATELLITE_PURPOSE_META[event.satellitePurpose]?.icon || '🛰',
               }
             : classifySatellitePurpose({
                 name: event.title,
@@ -348,8 +412,7 @@ export default function EventContent({ event, onClose }) {
           <div className="event-meta-grid" style={{ marginTop: 8 }}>
             <div className="event-meta-item" style={{ gridColumn: '1 / -1' }}>
               <span className="event-meta-label">Mission Purpose</span>
-              <span className="event-meta-value" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span aria-hidden>{purpose.icon}</span>
+              <span className="event-meta-value">
                 {purpose.label || event.satellitePurposeLabel || 'Unknown'}
               </span>
             </div>
@@ -446,17 +509,7 @@ export default function EventContent({ event, onClose }) {
         )}
 
         {event.disputed && (
-          <div style={{
-            padding: '8px 10px',
-            borderRadius: 6,
-            background: 'rgba(255, 170, 0, 0.08)',
-            border: '1px solid rgba(255, 170, 0, 0.2)',
-            fontFamily: 'var(--font-hud)',
-            fontSize: '9px',
-            letterSpacing: '0.15em',
-            color: 'var(--priority-p2)',
-          }}>
-            ⚠{' '}
+          <div className="rounded-md border border-p2/25 bg-p2/10 px-2.5 py-2 font-data text-[9px] uppercase tracking-[0.12em] text-p2">
             {event.toneDisagreement
               ? `Sources disagree on coverage tone (spread ${event.toneDisagreement.spread.toFixed(1)})`
               : 'Sources disagree on severity'}
@@ -471,16 +524,9 @@ export default function EventContent({ event, onClose }) {
               return (
                 <div
                   key={`${report.eventId}-${report.sourceId}`}
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    gap: 8,
-                    fontFamily: 'var(--font-data)',
-                    fontSize: '10px',
-                    color: 'var(--text-muted)',
-                  }}
+                  className="flex justify-between gap-2 font-data text-[10px] text-muted"
                 >
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span className="truncate">
                     {report.source || report.sourceId}
                   </span>
                   {tone ? (
@@ -497,18 +543,12 @@ export default function EventContent({ event, onClose }) {
         )}
 
         {event.tags?.length > 0 && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+          <div className="flex flex-wrap gap-1">
             {event.tags.slice(0, 6).map((tag) => (
-              <span key={tag} style={{
-                padding: '2px 6px',
-                borderRadius: 3,
-                background: 'rgba(255, 255, 255, 0.04)',
-                border: '1px solid rgba(255, 255, 255, 0.06)',
-                fontFamily: 'var(--font-data)',
-                fontSize: '9px',
-                color: 'var(--text-muted)',
-                opacity: 0.6,
-              }}>
+              <span
+                key={tag}
+                className="rounded-sm border border-line bg-surface px-1.5 py-0.5 font-data text-[9px] text-faint"
+              >
                 {tag}
               </span>
             ))}
@@ -529,7 +569,7 @@ export default function EventContent({ event, onClose }) {
             <button
               type="button"
               className="event-source-link"
-              style={{ flex: 1, minWidth: '120px', cursor: 'pointer', border: 'none', background: 'rgba(55, 138, 221, 0.12)' }}
+              style={{ flex: 1, minWidth: '120px', cursor: 'pointer', border: 'none', background: 'rgba(55, 138, 221, 0.12)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}
               onClick={() => {
                 openGdeltAnalytics({
                   query: buildGdeltDocQuery({
@@ -541,31 +581,31 @@ export default function EventContent({ event, onClose }) {
                 })
               }}
             >
-              ◎ GDELT Analyze
+              <Radar size={11} /> GDELT Analyze
             </button>
           )}
           {!event.trackKind && event.lat != null && (
             <button
               type="button"
               className="event-source-link"
-              style={{ flex: 1, minWidth: '110px', cursor: 'pointer', border: 'none', background: 'rgba(61, 214, 140, 0.10)' }}
+              style={{ flex: 1, minWidth: '110px', cursor: 'pointer', border: 'none', background: 'rgba(61, 214, 140, 0.10)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}
               onClick={() => openEventDossier(event)}
               title="Open the country dossier for this event's location"
             >
-              ◉ Open Dossier
+              <BookOpen size={11} /> Open Dossier
             </button>
           )}
           {activeWorkspaceId && !event.trackKind && (
             <button
               type="button"
               className="event-source-link"
-              style={{ flex: 1, minWidth: '110px', cursor: 'pointer', border: 'none', background: 'rgba(0, 207, 255, 0.10)' }}
+              style={{ flex: 1, minWidth: '110px', cursor: 'pointer', border: 'none', background: 'rgba(0, 207, 255, 0.10)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}
               onClick={() => {
                 if (addEventToCanvas(event)) openCanvas()
               }}
-              title="Add this signal to the investigation canvas"
+              title="Pin to investigation canvas (saved; removed from live globe)"
             >
-              + Canvas
+              <Plus size={11} /> Pin
             </button>
           )}
           {event.sourceUrl && (
@@ -574,15 +614,16 @@ export default function EventContent({ event, onClose }) {
               target="_blank"
               rel="noopener noreferrer"
               className="event-source-link"
-              style={{ flex: 1 }}
+              style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}
             >
-              ↗ View Source
+              <ExternalLink size={11} /> View Source
             </a>
           )}
+          {/* Street View is gated on precise geolocation — approximate events never offer it */}
           {!event.latApproximate && event.lat != null && (
             <button
               className="event-source-link"
-              style={{ flex: 0, whiteSpace: 'nowrap', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+              style={{ flex: 0, whiteSpace: 'nowrap', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}
               onClick={() => {
                 useAtlasStore.getState().openStreetView({
                   lat: event.lat,
@@ -597,8 +638,7 @@ export default function EventContent({ event, onClose }) {
                 })
               }}
             >
-              <IconStreetView />
-              Street View
+              <Eye size={11} /> Street View
             </button>
           )}
         </div>

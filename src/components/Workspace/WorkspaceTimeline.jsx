@@ -1,7 +1,6 @@
 import { useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { useAtlasStore } from '../../store/atlasStore'
-import { DIMENSION_COLORS, PRIORITY_LABELS } from '../../core/eventSchema'
 import Panel from '../../design/Panel'
 
 function timeAgo(dateStr) {
@@ -80,8 +79,8 @@ export default function WorkspaceTimeline() {
           <p className="ws-timeline__empty">Loading timeline…</p>
         ) : workspaceEvents.length === 0 ? (
           <div className="ws-timeline__empty">
-            <p>No signals captured yet.</p>
-            <p className="ws-timeline__hint">Matching events appear here as the feed updates.</p>
+            <p>No pinned signals yet.</p>
+            <p className="ws-timeline__hint">Pin a live event to the canvas to keep it in this workspace.</p>
           </div>
         ) : (
           <div className="ws-timeline__groups">
@@ -101,15 +100,15 @@ export default function WorkspaceTimeline() {
                         >
                           <span
                             className="ws-timeline__dim"
-                            style={{ backgroundColor: DIMENSION_COLORS[row.dimension || evt.dimension] || '#378ADD' }}
+                            style={{ backgroundColor: '#1a90ff' }}
                           />
-                          <span className={`ws-timeline__sev ws-timeline__sev--${row.priority || evt.priority || 'p3'}`} />
+                          <span className={`ws-timeline__sev`} />
                           <span className="ws-timeline__content">
                             <span className="ws-timeline__title">{row.title || evt.title}</span>
                             <span className="ws-timeline__meta">
                               {row.source || evt.source}
-                              {' · '}
-                              {PRIORITY_LABELS[row.priority || evt.priority] || row.priority}
+                              {' · Sev '}
+                              {row.severity || evt.severity || 1}
                               {' · '}
                               {timeAgo(row.captured_at)}
                             </span>

@@ -134,6 +134,16 @@ export const LAYER_CATALOG = {
     apiKeyHelpUrl: 'https://aisstream.io/apikeys',
     optIn: true,
   },
+  cameras: {
+    label: 'Live Cameras',
+    kind: 'event',
+    sources: ['cameras'],
+    globeModes: ['cesium', 'globegl', 'leaflet'],
+    apiKeyEnv: 'WINDY_API_KEY',
+    apiKeyServerOnly: true,
+    apiKeyHelpUrl: 'https://api.windy.com/keys',
+    optIn: true,
+  },
   gibsTrueColor: {
     label: 'GIBS True Color',
     kind: 'basemap',

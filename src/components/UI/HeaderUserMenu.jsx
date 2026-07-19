@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAtlasStore } from '../../store/atlasStore'
+import AuthStep from '../Onboarding/AuthStep'
 
 function getAvatarUrl(user) {
   if (!user?.user_metadata) return null
@@ -68,12 +69,12 @@ export default function HeaderUserMenu() {
   const mobileMode = useAtlasStore((s) => s.mobileMode)
   const signOut = useAtlasStore((s) => s.signOut)
   const openWorkbench = useAtlasStore((s) => s.openWorkbench)
-  const reopenOnboarding = useAtlasStore((s) => s.reopenOnboarding)
   const setAppView = useAtlasStore((s) => s.setAppView)
   const exitWorkspace = useAtlasStore((s) => s.exitWorkspace)
   const activeWorkspaceId = useAtlasStore((s) => s.activeWorkspaceId)
 
   const [open, setOpen] = useState(false)
+  const [authOpen, setAuthOpen] = useState(false)
   const containerRef = useRef(null)
 
   const close = useCallback(() => setOpen(false), [])
@@ -92,13 +93,15 @@ export default function HeaderUserMenu() {
   }, [open, close])
 
   useEffect(() => {
-    if (!open) return
+    if (!open && !authOpen) return
     function onKey(e) {
-      if (e.key === 'Escape') close()
+      if (e.key !== 'Escape') return
+      if (authOpen) setAuthOpen(false)
+      else close()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, close])
+  }, [open, authOpen, close])
 
   const avatarUrl = user ? getAvatarUrl(user) : null
   const initials = user ? getInitials(user) : ''
@@ -114,8 +117,8 @@ export default function HeaderUserMenu() {
   }
 
   const handleSignIn = () => {
-    reopenOnboarding()
     close()
+    setAuthOpen(true)
   }
 
   const handleWorkspaces = () => {
@@ -126,6 +129,41 @@ export default function HeaderUserMenu() {
 
   return (
     <div ref={containerRef} style={{ position: 'relative' }}>
+      <AnimatePresence>
+        {authOpen && (
+          <motion.div
+            className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setAuthOpen(false)}
+          >
+            <motion.div
+              role="dialog"
+              aria-modal="true"
+              aria-label="Sign in"
+              className="auth-panel w-full max-w-[400px] rounded-2xl border border-white/[0.08] bg-[#0a0f1e]/95 p-6 shadow-2xl"
+              initial={{ opacity: 0, y: 12, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 8, scale: 0.98 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-5 flex items-center justify-between gap-3">
+                <h2 className="text-sm font-semibold tracking-wide text-white">Sign in</h2>
+                <button
+                  type="button"
+                  className="text-xs text-white/45 hover:text-white transition-colors"
+                  onClick={() => setAuthOpen(false)}
+                >
+                  Close
+                </button>
+              </div>
+              <AuthStep onSuccess={() => setAuthOpen(false)} />
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <button
         type="button"
         className={`hud-icon-btn ${open ? 'active' : ''} ${user ? 'p-0 overflow-hidden' : ''}`}

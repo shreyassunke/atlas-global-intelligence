@@ -45,7 +45,7 @@ export async function fetchGdeltSummary(query, { timespan = '24h', signal } = {}
 
   let json
   try {
-    json = await fetchGdeltJson(url, { signal })
+    json = await fetchGdeltJson(url, { signal, priority: 'interactive' })
   } catch {
     // Summary API is best-effort — don't surface an error banner, just return null.
     return null

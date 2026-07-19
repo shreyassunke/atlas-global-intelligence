@@ -1,7 +1,7 @@
 /**
  * globe-core/useGlobeLayerEvents — shared globe event filtering for all
- * renderers. Respects Settings → Data Layers, dimension filters, time and
- * priority HUD tiers, and the world-zoom LOD gate.
+ * renderers. Respects Settings → Data Layers and time HUD.
+ * Dimension taxonomy is not a user-facing filter — layers + interests define scope.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useAtlasStore } from '../store/atlasStore'
@@ -18,56 +18,26 @@ import {
   MAX_TACTICAL_SATELLITES,
   MAX_TACTICAL_VESSELS,
 } from './lod'
+import {
+  eventTimestampMs,
+  passesAtlasTimeFilter,
+  pinnedEventIds,
+} from '../core/atlasCycle'
 
-const TIME_FILTER_MAX_AGE_MS = {
-  live: 2 * 3600_000,
-  '24h': 24 * 3600_000,
-  '7d': 7 * 24 * 3600_000,
-  '30d': 30 * 24 * 3600_000,
-}
-
-const DEFAULT_DIMENSIONS = ['safety', 'governance', 'economy', 'people', 'environment', 'narrative']
 export const SAT_PROPAGATION_INTERVAL_MS = 2000
-
-function effectiveDimensions(activeDimensions) {
-  if (!activeDimensions || activeDimensions.size === 0) {
-    return new Set(DEFAULT_DIMENSIONS)
-  }
-  return activeDimensions
-}
 
 function isLayerEnabled(dataLayers, layerKey) {
   if (!layerKey) return false
   return isLayerToggleOn(layerKey, dataLayers || {})
 }
 
-function passesTimeFilter(evt, timeFilter) {
-  const maxAgeMs = TIME_FILTER_MAX_AGE_MS[timeFilter] ?? TIME_FILTER_MAX_AGE_MS.live
-  const now = Date.now()
-  const tsMs = evt.timestamp ? new Date(evt.timestamp).getTime() : NaN
-  const fMs = evt.fetchedAt ? new Date(evt.fetchedAt).getTime() : NaN
-  const refMs = Math.max(
-    Number.isFinite(tsMs) ? tsMs : -Infinity,
-    Number.isFinite(fMs) ? fMs : -Infinity,
-  )
-  if (Number.isFinite(refMs) && refMs > -Infinity && now - refMs > maxAgeMs) return false
-  return true
-}
-
-function passesPriorityFilter(evt, priorityFilter) {
-  if (priorityFilter === 'p1' && evt.priority !== 'p1') return false
-  if (priorityFilter === 'p1p2' && evt.priority === 'p3') return false
-  return true
-}
-
 export function useGlobeLayerEvents() {
   const events = useAtlasStore((s) => s.events)
   const dataLayers = useAtlasStore((s) => s.dataLayers)
-  const activeDimensions = useAtlasStore((s) => s.activeDimensions)
-  const priorityFilter = useAtlasStore((s) => s.priorityFilter)
   const timeFilter = useAtlasStore((s) => s.timeFilter)
-  // Boolean selector — re-renders only when the LOD tier flips, not on every zoom tick.
-  const worldZoom = useAtlasStore((s) => isWorldZoom(s.globeMode, s.zoomLevel))
+  const globeMode = useAtlasStore((s) => s.globeMode)
+  const zoomLevel = useAtlasStore((s) => s.zoomLevel)
+  const investigation = useAtlasStore((s) => s.investigation)
 
   const [propagationTick, setPropagationTick] = useState(0)
   useEffect(() => {
@@ -76,44 +46,38 @@ export function useGlobeLayerEvents() {
     return () => clearInterval(id)
   }, [dataLayers?.satellites])
 
-  const dims = useMemo(() => effectiveDimensions(activeDimensions), [activeDimensions])
-
   const globePlottedEvents = useMemo(() => {
     const list = []
     const now = Date.now()
+    const pinned = pinnedEventIds(investigation)
+    // Declutter rule (lod.js): at world zoom show P1/P2 pins only;
+    // zooming in reveals the full P3-inclusive set.
+    const worldZoom = isWorldZoom(globeMode, zoomLevel)
     for (const evt of events) {
       if (evt.trackKind === 'aircraft' || evt.trackKind === 'satellite' || evt.trackKind === 'vessel' || evt.trackKind === 'storm') continue
+      if (pinned.has(evt.id)) continue
       if (!hasPreciseGeolocation(evt)) continue
 
       const layerKey = eventSourceToGlobeDataLayerKey(evt)
       if (!layerKey || !isLayerEnabled(dataLayers, layerKey)) continue
-      if (!dims.has(evt.dimension)) continue
-      if (worldZoom && evt.priority === 'p3') continue // LOD: P1/P2 only at world zoom
-      if (!passesPriorityFilter(evt, priorityFilter)) continue
-      if (!passesTimeFilter(evt, timeFilter)) continue
+      if (!passesAtlasTimeFilter(evt, timeFilter, now)) continue
+      if (worldZoom && (evt.severity || 1) <= 1) continue
       list.push(evt)
     }
 
     if (list.length <= MAX_GLOBE_MARKERS) return list
 
-    const priorityRank = { p1: 3, p2: 2, p3: 1 }
     const scored = list.map((evt) => {
-      const tsRaw = evt.timestamp ? new Date(evt.timestamp).getTime() : NaN
-      const fAt = evt.fetchedAt ? new Date(evt.fetchedAt).getTime() : NaN
-      const ts = Math.max(
-        Number.isFinite(tsRaw) ? tsRaw : -Infinity,
-        Number.isFinite(fAt) ? fAt : -Infinity,
-      )
-      const tsForRank = Number.isFinite(ts) && ts > -Infinity ? ts : now
+      const ts = eventTimestampMs(evt)
+      const tsForRank = Number.isFinite(ts) ? ts : now
       const ageMin = Math.max(0, (now - tsForRank) / 60_000)
       const recency = Math.exp(-ageMin / 60)
       const sev = (evt.severity || 1) / 5
-      const pri = priorityRank[evt.priority] || 1
-      return { evt, score: recency * 2 + sev * 1.5 + pri }
+      return { evt, score: recency * 2 + sev * 3.0 }
     })
     scored.sort((a, b) => b.score - a.score)
     return scored.slice(0, MAX_GLOBE_MARKERS).map((s) => s.evt)
-  }, [events, dataLayers, dims, priorityFilter, timeFilter, worldZoom])
+  }, [events, dataLayers, timeFilter, globeMode, zoomLevel, investigation])
 
   const tacticalAircraft = useMemo(() => {
     if (!isLayerEnabled(dataLayers, 'adsb')) return []

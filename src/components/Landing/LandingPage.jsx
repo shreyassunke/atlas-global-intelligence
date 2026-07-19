@@ -42,8 +42,7 @@ const blockRise = {
 
 export default function LandingPage() {
   const acknowledgeLanding = useAtlasStore((s) => s.acknowledgeLanding)
-  const setOnboardingStep = useAtlasStore((s) => s.setOnboardingStep)
-  const hasCompletedOnboarding = useAtlasStore((s) => s.hasCompletedOnboarding)
+  const launchWithAllSources = useAtlasStore((s) => s.launchWithAllSources)
   const landingScrollRef = useRef(null)
   const navTopSentinelRef = useRef(null)
   const [navAtTop, setNavAtTop] = useState(true)
@@ -58,9 +57,9 @@ export default function LandingPage() {
   }, [])
 
   const enterApp = useCallback(() => {
-    setOnboardingStep('auth')
     acknowledgeLanding()
-  }, [acknowledgeLanding, setOnboardingStep])
+    launchWithAllSources()
+  }, [acknowledgeLanding, launchWithAllSources])
 
   const toggleImmersive = useCallback(() => {
     setImmersive((prev) => !prev)
@@ -331,7 +330,7 @@ export default function LandingPage() {
               {
                 n: '03',
                 title: 'Pattern Recognition',
-                body: 'Regional clusters and category filters reveal how stories connect across borders — what a single headline never shows.',
+                body: 'Regional clusters reveal how stories connect across borders — what a single headline never shows.',
               },
               {
                 n: '04',

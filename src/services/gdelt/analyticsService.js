@@ -8,6 +8,11 @@
 
 import { buildGdeltUrl, fetchGdeltJson } from './gdeltHttp.js'
 import {
+  artlistCacheKey,
+  getCachedArticles,
+  setCachedArticles,
+} from './docArticlesCache.js'
+import {
   DIMENSION_GDELT_QUERIES,
   buildGdeltDocQuery,
   formatGdeltDateTick,
@@ -30,7 +35,11 @@ function buildDocUrl(query, mode, timespan, extraParams = {}) {
 }
 
 function fetchDocJson(query, mode, timespan, opts, extraParams) {
-  return fetchGdeltJson(buildDocUrl(query, mode, timespan, extraParams), opts)
+  const priority = opts?.priority || 'interactive'
+  return fetchGdeltJson(buildDocUrl(query, mode, timespan, extraParams), {
+    ...opts,
+    priority,
+  })
 }
 
 /** GDELT timeline JSON: `{ timeline: [{ series, data: [{ date, value, norm? }] }] }` */
@@ -118,14 +127,104 @@ function parseArticleListJson(json) {
 }
 
 /**
- * Phase 5 — DOC article list (mode=artlist) for Dossier evidence sections.
+ * DOC article list (mode=artlist) with L0/L1 SWR + stale-if-error.
+ * @returns {Promise<object[] | { articles: object[], meta: object }>}
  */
-export async function fetchDocArticles(query, timespan, { maxrecords = 12, signal } = {}) {
-  const json = await fetchDocJson(query, 'artlist', timespan, { signal }, {
-    maxrecords: Math.max(1, Math.min(75, Number(maxrecords) || 12)),
-    sort: 'hybridrel',
-  })
-  return parseArticleListJson(json).slice(0, maxrecords)
+export async function fetchDocArticles(
+  query,
+  timespan,
+  {
+    maxrecords = 12,
+    signal,
+    priority = 'interactive',
+    /** When true, return `{ articles, meta }` instead of a bare array. */
+    withMeta = false,
+    /** Skip network when a fresh cache hit exists; serve stale + revalidate. */
+    allowStale = true,
+  } = {},
+) {
+  const capped = Math.max(1, Math.min(75, Number(maxrecords) || 12))
+  const sort = 'hybridrel'
+  const key = artlistCacheKey(query, timespan, capped, sort)
+  const cached = await getCachedArticles(key)
+
+  const wrap = (articles, meta) => (withMeta ? { articles, meta } : articles)
+
+  if (cached?.fresh && Array.isArray(cached.articles)) {
+    return wrap(cached.articles.slice(0, capped), {
+      cacheLayer: cached.layer,
+      stale: false,
+      fromCache: true,
+    })
+  }
+
+  // Stale-while-revalidate: paint immediately, refresh cache in background.
+  if (allowStale && cached?.stale && Array.isArray(cached.articles) && cached.articles.length) {
+    void (async () => {
+      try {
+        const json = await fetchDocJson(
+          query,
+          'artlist',
+          timespan,
+          { priority },
+          { maxrecords: capped, sort },
+        )
+        await setCachedArticles(key, parseArticleListJson(json).slice(0, capped))
+      } catch {
+        /* keep stale */
+      }
+    })()
+    return wrap(cached.articles.slice(0, capped), {
+      cacheLayer: cached.layer,
+      stale: true,
+      fromCache: true,
+      revalidating: true,
+    })
+  }
+
+  try {
+    const json = await fetchDocJson(
+      query,
+      'artlist',
+      timespan,
+      { signal, priority },
+      { maxrecords: capped, sort },
+    )
+    const articles = parseArticleListJson(json).slice(0, capped)
+    await setCachedArticles(key, articles)
+    return wrap(articles, {
+      cacheLayer: 'network',
+      stale: false,
+      fromCache: false,
+    })
+  } catch (err) {
+    if (err?.name === 'AbortError') throw err
+    // Stale-if-error: prefer last-good over a hard failure.
+    if (allowStale && cached?.articles?.length) {
+      return wrap(cached.articles.slice(0, capped), {
+        cacheLayer: cached.layer,
+        stale: true,
+        fromCache: true,
+        error: err?.message || String(err),
+      })
+    }
+    throw err
+  }
+}
+
+/**
+ * Warm ArtList cache without throwing (intent prefetch).
+ */
+export async function prefetchDocArticles(query, timespan, opts = {}) {
+  try {
+    return await fetchDocArticles(query, timespan, {
+      maxrecords: 14,
+      priority: 'interactive',
+      ...opts,
+    })
+  } catch {
+    return null
+  }
 }
 
 export async function fetchTimelineVol(query, timespan, opts) {

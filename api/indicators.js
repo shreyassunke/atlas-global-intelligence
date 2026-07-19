@@ -1,14 +1,21 @@
 /**
- * GET /api/indicators?iso=US&country=United+States
+ * GET /api/indicators?iso=US&lat=47.61&lng=-122.2
  *
- * Server-side indicator proxy — keeps FRED_KEY and FINNHUB_KEY off the client.
+ * Server-side indicator proxy — FRED / Census / BEA. Finnhub FX omitted from
+ * place Economy (always global; common 403 on free keys).
  */
-import { fetchFredIndicators } from '../src/services/indicators/fredAdapter.js'
-import { fetchFinnhubIndicators } from '../src/services/indicators/finnhubAdapter.js'
+import { fetchFredIndicators, fetchFredLocalUnemployment } from '../src/services/indicators/fredAdapter.js'
+import { fetchCensusCountyIndicators } from '../src/services/indicators/censusAdapter.js'
+import { fetchBeaCountyIncome } from '../src/services/indicators/beaAdapter.js'
+import {
+  resolveUsGeoFromCoords,
+  formatCountyLabel,
+  formatMsaLabel,
+} from '../src/services/indicators/usGeoResolve.js'
 
 export const config = {
   runtime: 'nodejs',
-  maxDuration: 15,
+  maxDuration: 20,
 }
 
 const CACHE = new Map()
@@ -37,8 +44,14 @@ export default async function handler(req) {
   }
 
   const url = new URL(req.url, 'http://localhost')
-  const iso = url.searchParams.get('iso') || ''
-  const cacheKey = iso || 'global'
+  const iso = (url.searchParams.get('iso') || '').toUpperCase()
+  const lat = parseFloat(url.searchParams.get('lat') || '')
+  const lng = parseFloat(url.searchParams.get('lng') || '')
+  const cacheKey = [
+    iso || 'global',
+    Number.isFinite(lat) ? lat.toFixed(3) : '',
+    Number.isFinite(lng) ? lng.toFixed(3) : '',
+  ].join('|')
 
   const cached = CACHE.get(cacheKey)
   if (cached && Date.now() - cached.at < CACHE_MS) {
@@ -49,17 +62,83 @@ export default async function handler(req) {
   }
 
   const fredKey = process.env.FRED_KEY || process.env.VITE_FRED_KEY || ''
-  const finnhubKey = process.env.FINNHUB_KEY || process.env.VITE_FINNHUB_KEY || ''
+  const censusKey = process.env.CENSUS_API_KEY || process.env.VITE_CENSUS_API_KEY || ''
+  const beaKey = process.env.BEA_KEY || process.env.VITE_BEA_KEY || ''
 
   try {
-    const [fred, finnhub] = await Promise.all([
+    const isUS = iso === 'US' || iso === 'USA' || (!iso && Number.isFinite(lat) && Number.isFinite(lng))
+    let geo = null
+    if (isUS && Number.isFinite(lat) && Number.isFinite(lng)) {
+      geo = await resolveUsGeoFromCoords(lat, lng)
+    }
+
+    const countyLabel = formatCountyLabel(geo)
+    const msaLabel = formatMsaLabel(geo)
+
+    const tasks = [
       fetchFredIndicators({ apiKey: fredKey }),
-      fetchFinnhubIndicators({ apiKey: finnhubKey, iso }),
-    ])
+    ]
+
+    if (geo?.stateFips && geo?.countyFips) {
+      tasks.push(
+        fetchCensusCountyIndicators({
+          stateFips: geo.stateFips,
+          countyFips: geo.countyFips,
+          apiKey: censusKey,
+          scopeLabel: countyLabel || geo.geoid,
+        }),
+      )
+      tasks.push(
+        fetchBeaCountyIncome({
+          geoid: geo.geoid,
+          apiKey: beaKey,
+          scopeLabel: countyLabel || geo.geoid,
+        }),
+      )
+      if (fredKey) {
+        const searchText = [
+          countyLabel || geo.countyName,
+          geo.stateAbbr || geo.stateName,
+          'Unemployment Rate',
+        ].filter(Boolean).join(' ')
+        tasks.push(
+          fetchFredLocalUnemployment({
+            apiKey: fredKey,
+            searchText,
+            scopeLabel: countyLabel || msaLabel || 'County',
+          }),
+        )
+      }
+    }
+
+    const settled = await Promise.all(tasks)
+    const fredNational = settled[0] || []
+    const local = settled.slice(1).flat()
+
+    const localOk = local.filter((i) => i && i.status !== 'missing_key')
+    const dataLevel = localOk.some((i) => i.status === 'ok')
+      ? (geo?.countyName ? 'county' : (geo?.cbsaName ? 'msa' : 'county'))
+      : 'country'
+    const dataName = localOk.some((i) => i.status === 'ok')
+      ? (countyLabel || msaLabel || 'County')
+      : 'United States'
 
     const payload = {
       iso,
-      indicators: [...fred, ...finnhub],
+      geo: geo
+        ? {
+            stateFips: geo.stateFips,
+            countyFips: geo.countyFips,
+            geoid: geo.geoid,
+            countyName: countyLabel,
+            placeName: geo.placeName,
+            cbsaCode: geo.cbsaCode,
+            cbsaName: msaLabel,
+          }
+        : null,
+      dataLevel,
+      dataName,
+      indicators: [...localOk, ...fredNational],
       fetchedAt: new Date().toISOString(),
     }
 

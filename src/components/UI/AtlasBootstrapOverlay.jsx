@@ -1,4 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion'
+import { AtlasWordmark } from './AtlasWordmark'
 
 const STATUS_ICON = {
   ready: '✓',
@@ -19,14 +20,14 @@ export default function AtlasBootstrapOverlay({ visible, steps, progress, hasFai
           key="atlas-bootstrap"
           initial={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.85, ease: [0.16, 1, 0.3, 1] }}
+          transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
           className="atlas-bootstrap-overlay"
           role="status"
           aria-live="polite"
           aria-busy="true"
         >
           <div className="atlas-bootstrap-card">
-            <div className="atlas-bootstrap-brand">ATLAS</div>
+            <AtlasWordmark height={28} className="atlas-bootstrap-brand" withGlow />
             <p className="atlas-bootstrap-tagline">Preparing live intelligence layers…</p>
 
             <div className="atlas-bootstrap-progress-track" aria-hidden>
@@ -64,7 +65,7 @@ export default function AtlasBootstrapOverlay({ visible, steps, progress, hasFai
             )}
             {!hasFailures && (
               <p className="atlas-bootstrap-hint">
-                Core layers load first (~9s). Aircraft, satellites, and GDELT heatmap continue in the background.
+                Core layers load first, then aircraft and satellites continue in the background.
               </p>
             )}
           </div>

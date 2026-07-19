@@ -1,7 +1,5 @@
-import { useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { colors } from '../../design/tokens'
-import { DIMENSION_COLORS } from '../../core/eventSchema'
 
 const STATUS_META = {
   monitoring: { label: 'Monitoring', pulse: true },
@@ -24,18 +22,12 @@ export default function WorkspaceCard({
 }) {
   const status = STATUS_META[workspace.status] || STATUS_META.monitoring
   const keywords = workspace.keywords || []
-  const dims = workspace.active_dimensions || []
-
-  const accentColor = useMemo(() => {
-    if (dims.length === 1) return DIMENSION_COLORS[dims[0]] || colors.accent
-    return colors.accent
-  }, [dims])
 
   return (
     <motion.article
       layout
       className="ws-card"
-      style={{ '--ws-accent': accentColor }}
+      style={{ '--ws-accent': colors.accent }}
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.98 }}

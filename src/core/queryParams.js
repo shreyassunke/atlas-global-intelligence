@@ -14,7 +14,6 @@ import { DIMENSION_KEYS } from './eventSchema'
 
 export const QUERY_SCHEMA = {
   dimensions: DIMENSION_KEYS,
-  priority: ['p1', 'p1p2', 'all'],
   timespan: ['live', '24h', '7d', '30d', 'custom'],
   toneFilter: ['negative', 'neutral', 'positive'],
   region: null, // { lat, lng, radiusKm } — for NLP "show me regions..."
@@ -25,7 +24,6 @@ export const QUERY_SCHEMA = {
  *
  * @param {Object} state
  * @param {Set|Array} state.activeDimensions - Active dimension keys
- * @param {string} state.priorityFilter - 'all' (default) | 'p1' | 'p1p2'
  * @param {string} state.timeFilter - 'live' | '24h' | '7d' | '30d' | 'custom'
  * @param {string} [state.toneFilter] - 'negative' | 'neutral' | 'positive'
  * @param {{ lat: number, lng: number, radiusKm: number }} [state.region]
@@ -40,11 +38,6 @@ export function serializeFilters(state) {
     : [...state.activeDimensions]
   if (dims.length < DIMENSION_KEYS.length) {
     params.set('dim', dims.join(','))
-  }
-
-  // Priority — default is `all`; encode any non-default so `p1` round-trips
-  if (state.priorityFilter && state.priorityFilter !== 'all') {
-    params.set('pri', state.priorityFilter)
   }
 
   // Time
@@ -83,14 +76,6 @@ export function deserializeFilters(searchParams) {
     const dims = params.get('dim').split(',').filter(d => DIMENSION_KEYS.includes(d))
     if (dims.length > 0) {
       state.activeDimensions = new Set(dims)
-    }
-  }
-
-  // Priority
-  if (params.has('pri')) {
-    const pri = params.get('pri')
-    if (QUERY_SCHEMA.priority.includes(pri)) {
-      state.priorityFilter = pri
     }
   }
 

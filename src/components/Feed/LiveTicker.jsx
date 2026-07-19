@@ -1,20 +1,84 @@
+/**
+ * LiveTicker — bottom headline ticker + expandable "ATLAS Feed" overlay.
+ * Redesigned as an evidence stream: authoritative signals lead, social /
+ * unverified firehose (Bluesky) is grouped behind a collapsed section, and
+ * every card carries provenance (source + tier + freshness).
+ * News is unlabeled — no dimension/category filters or badges.
+ */
 import { useRef, useEffect, useMemo, useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { X, ChevronDown, ChevronRight } from 'lucide-react'
 import { useAtlasStore } from '../../store/atlasStore'
-import { isTickerFeedEvent } from '../../core/sourceGeolocation'
-import { CATEGORIES } from '../../utils/categoryColors'
-import { DIMENSION_COLORS, DIMENSION_LABELS, DIMENSION_ICONS, DIMENSION_KEYS } from '../../core/eventSchema'
-import { legacyCategoryToDimension } from '../../utils/categoryColors'
+import { isTickerFeedEvent, getEventSourceId } from '../../core/sourceGeolocation'
+import { cleanEventText, timeAgoLabel } from '../../utils/text.js'
+import { TierDot } from '../ui/provenance-chip.jsx'
+import { getSourceGeoTier } from '../../core/sourceGeolocation'
+import { isWithinAtlasCycle } from '../../core/atlasCycle'
 
-function timeAgo(dateStr) {
-  if (!dateStr) return ''
-  const diff = Date.now() - new Date(dateStr).getTime()
-  const minutes = Math.floor(diff / 60000)
-  if (minutes < 1) return 'now'
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  return `${Math.floor(hours / 24)}d ago`
+/** Neutral accent for feed chrome — not a taxonomy color. */
+const SIGNAL_COLOR = 'rgba(255, 255, 255, 0.55)'
+
+/** Social / unverified firehose sources — collapsed below authoritative signals. */
+const SOCIAL_SOURCE_IDS = new Set(['bluesky'])
+
+function isSocialItem(item) {
+  if (!item.isEvent) return false
+  return SOCIAL_SOURCE_IDS.has(getEventSourceId(item.event))
+}
+
+function FeedCard({ item, onClick }) {
+  const tier = item.isEvent ? getSourceGeoTier(getEventSourceId(item.event)) : null
+  const corroborated = item.isEvent && (item.event.corroborationCount || 1) > 1
+  return (
+    <button className="feed-card" onClick={onClick}>
+      <div className="feed-card-stripe" style={{ background: SIGNAL_COLOR }} />
+      {item.mediaType === 'video' && item.thumbnailUrl && (
+        <div className="relative w-full h-24 overflow-hidden rounded-t" style={{ margin: '-12px -14px 8px -14px', width: 'calc(100% + 28px)' }}>
+          <img src={item.thumbnailUrl} alt="" loading="lazy" className="w-full h-full object-cover" />
+          {item.isLive && (
+            <span
+              className="absolute top-1.5 left-1.5 flex items-center gap-0.5 bg-red-600/90 text-white text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
+              title="Live YouTube broadcast"
+            >
+              <span className="w-1 h-1 rounded-full bg-white animate-pulse" />
+              LIVE
+            </span>
+          )}
+        </div>
+      )}
+      <div className="feed-card-body">
+        <div className="feed-card-meta">
+          <span className="feed-card-time">{timeAgoLabel(item.time)}</span>
+          {item.mediaType === 'video' && !item.thumbnailUrl && (
+            <span style={{ fontSize: 9, color: item.isLive ? '#ef4444' : 'rgba(255,255,255,0.5)', marginLeft: 4 }}>
+              {item.isLive ? '● LIVE' : '▶ VIDEO'}
+            </span>
+          )}
+        </div>
+        <h4 className="feed-card-title">{item.title}</h4>
+        {item.description && <p className="feed-card-desc">{item.description}</p>}
+        <div className="feed-card-source items-center gap-1.5">
+          {tier ? (
+            <TierDot tier={tier} />
+          ) : (
+            <div className="feed-card-source-dot" style={{ backgroundColor: SIGNAL_COLOR }} />
+          )}
+          {item.source}
+          {corroborated && (
+            <span
+              className="font-data text-[9px] text-accent"
+              title={`${item.event.corroborationCount} corroborating sources`}
+            >
+              ×{item.event.corroborationCount}
+            </span>
+          )}
+          {item.isEvent && item.event.latApproximate && (
+            <span className="font-data text-[9px] text-p2" title="Approximate location — never pinned on globe">≈</span>
+          )}
+        </div>
+      </div>
+    </button>
+  )
 }
 
 export default function LiveTicker() {
@@ -23,11 +87,10 @@ export default function LiveTicker() {
   const setSelectedMarker = useAtlasStore((s) => s.setSelectedMarker)
   const setSelectedEvent = useAtlasStore((s) => s.setSelectedEvent)
   const mobileMode = useAtlasStore((s) => s.mobileMode)
-  const scrollRef = useRef(null)
   const dockRef = useRef(null)
   const [feedOpen, setFeedOpen] = useState(false)
   const [feedSearch, setFeedSearch] = useState('')
-  const [feedCategory, setFeedCategory] = useState('all')
+  const [socialOpen, setSocialOpen] = useState(false)
   const hoverTimer = useRef(null)
   const feedRef = useRef(null)
 
@@ -35,7 +98,7 @@ export default function LiveTicker() {
     // Ticker: approximate / unmapped sources + commercial news.
     // P1 globe events still surface here for breaking visibility.
     const eventItems = events
-      .filter(isTickerFeedEvent)
+      .filter((e) => isTickerFeedEvent(e) && isWithinAtlasCycle(e))
       .sort((a, b) => {
         const pr = { p1: 3, p2: 2, p3: 1 }
         const pd = (pr[b.priority] || 0) - (pr[a.priority] || 0)
@@ -47,35 +110,31 @@ export default function LiveTicker() {
         id: `evt_${e.id}`,
         isEvent: true,
         event: e,
-        title: e.title,
+        title: cleanEventText(e.title),
         source: e.source,
-        color: DIMENSION_COLORS[e.dimension] || '#1a90ff',
-        dimension: e.dimension,
+        color: SIGNAL_COLOR,
         priority: e.priority,
         time: e.timestamp,
         severity: e.severity,
       }))
 
     const newsTickerItems = newsItems
+      .filter((n) => isWithinAtlasCycle({ timestamp: n.publishedAt }))
       .sort((a, b) => b.importance - a.importance)
       .slice(0, 45)
-      .map(n => {
-        const dim = legacyCategoryToDimension(n.category)
-        return {
-          id: `news_${n.id}`,
-          isEvent: false,
-          news: n,
-          title: n.title,
-          source: n.source,
-          color: DIMENSION_COLORS[dim] || CATEGORIES[n.category]?.color || '#fff',
-          dimension: dim,
-          time: n.publishedAt,
-          severity: 0,
-          mediaType: n.mediaType,
-          isLive: n.isLive,
-          thumbnailUrl: n.thumbnailUrl,
-        }
-      })
+      .map(n => ({
+        id: `news_${n.id}`,
+        isEvent: false,
+        news: n,
+        title: cleanEventText(n.title),
+        source: n.source,
+        color: SIGNAL_COLOR,
+        time: n.publishedAt,
+        severity: 0,
+        mediaType: n.mediaType,
+        isLive: n.isLive,
+        thumbnailUrl: n.thumbnailUrl,
+      }))
 
     return [...eventItems, ...newsTickerItems]
       .sort((a, b) => b.severity - a.severity || new Date(b.time) - new Date(a.time))
@@ -84,85 +143,76 @@ export default function LiveTicker() {
 
   const feedItems = useMemo(() => {
     const evtFeed = events
-      .filter(isTickerFeedEvent)
+      .filter((e) => isTickerFeedEvent(e) && isWithinAtlasCycle(e))
       .sort((a, b) => b.severity - a.severity || new Date(b.timestamp) - new Date(a.timestamp))
       .slice(0, 40)
       .map(e => ({
         id: `evt_${e.id}`,
         isEvent: true,
         event: e,
-        title: e.title,
+        title: cleanEventText(e.title),
         source: e.source,
-        description: e.detail,
-        color: DIMENSION_COLORS[e.dimension] || '#1a90ff',
-        dimension: e.dimension,
+        description: cleanEventText(e.detail),
+        color: SIGNAL_COLOR,
         priority: e.priority,
         time: e.timestamp,
-        category: e.dimension,
         severity: e.severity,
       }))
 
     const newsFeed = newsItems
+      .filter((n) => isWithinAtlasCycle({ timestamp: n.publishedAt }))
       .sort((a, b) => b.importance - a.importance)
       .slice(0, 80)
-      .map(n => {
-        const dim = legacyCategoryToDimension(n.category)
-        return {
-          id: `news_${n.id}`,
-          isEvent: false,
-          news: n,
-          title: n.title,
-          source: n.source,
-          description: n.description,
-          color: DIMENSION_COLORS[dim] || CATEGORIES[n.category]?.color || '#fff',
-          dimension: dim,
-          time: n.publishedAt,
-          category: n.category,
-          severity: 0,
-          mediaType: n.mediaType,
-          isLive: n.isLive,
-          thumbnailUrl: n.thumbnailUrl,
-        }
-      })
+      .map(n => ({
+        id: `news_${n.id}`,
+        isEvent: false,
+        news: n,
+        title: cleanEventText(n.title),
+        source: n.source,
+        description: cleanEventText(n.description),
+        color: SIGNAL_COLOR,
+        time: n.publishedAt,
+        severity: 0,
+        mediaType: n.mediaType,
+        isLive: n.isLive,
+        thumbnailUrl: n.thumbnailUrl,
+      }))
 
     return [...evtFeed, ...newsFeed]
       .sort((a, b) => b.severity - a.severity || new Date(b.time) - new Date(a.time))
       .slice(0, 120)
   }, [events, newsItems])
 
-  const feedDimensionsInUse = useMemo(() => {
-    const seen = new Set()
-    for (const item of feedItems) {
-      if (item.dimension) seen.add(item.dimension)
-    }
-    return DIMENSION_KEYS.filter((k) => seen.has(k))
-  }, [feedItems])
-
   const normalizedQuery = feedSearch.trim().toLowerCase()
 
   const filteredFeedItems = useMemo(() => {
+    if (!normalizedQuery) return feedItems
     return feedItems.filter((item) => {
-      if (feedCategory !== 'all' && item.dimension !== feedCategory) return false
-      if (!normalizedQuery) return true
       const hay = `${item.title || ''} ${item.description || ''} ${item.source || ''}`.toLowerCase()
       return hay.includes(normalizedQuery)
     })
-  }, [feedItems, feedCategory, normalizedQuery])
+  }, [feedItems, normalizedQuery])
+
+  // Evidence hierarchy: authoritative / verified sources lead; the social
+  // firehose collapses behind an explicit section (SOURCES.md tier model).
+  const { signalItems, socialItems } = useMemo(() => {
+    const signal = []
+    const social = []
+    for (const item of filteredFeedItems) {
+      if (isSocialItem(item)) social.push(item)
+      else signal.push(item)
+    }
+    return { signalItems: signal, socialItems: social }
+  }, [filteredFeedItems])
 
   const feedCountLabel = useMemo(() => {
     const n = filteredFeedItems.length
     const t = feedItems.length
-    if (feedCategory !== 'all' || normalizedQuery) {
+    if (normalizedQuery) {
       return t > 0 ? `${n} / ${t} items` : `${n} items`
     }
     return `${n} items`
-  }, [filteredFeedItems.length, feedItems.length, feedCategory, normalizedQuery])
-
-  useEffect(() => {
-    if (feedCategory !== 'all' && !feedDimensionsInUse.includes(feedCategory)) {
-      setFeedCategory('all')
-    }
-  }, [feedCategory, feedDimensionsInUse])
+  }, [filteredFeedItems.length, feedItems.length, normalizedQuery])
 
   const handleDockMouseEnter = useCallback(() => {
     if (mobileMode) return
@@ -194,26 +244,9 @@ export default function LiveTicker() {
     return () => window.removeEventListener('pointerdown', onPointerDownCapture, true)
   }, [feedOpen, closeFeed])
 
-  useEffect(() => {
-    const el = scrollRef.current
-    if (!el || tickerItems.length === 0) return
-
-    let animFrame
-    let scrollPos = 0
-    const speed = 0.5
-
-    function tick() {
-      scrollPos += speed
-      if (scrollPos >= el.scrollWidth / 2) scrollPos = 0
-      el.scrollLeft = scrollPos
-      animFrame = requestAnimationFrame(tick)
-    }
-
-    animFrame = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(animFrame)
-  }, [tickerItems.length])
-
   if (tickerItems.length === 0) return null
+
+  const tickerDuration = `${tickerItems.length * 8}s`
 
   const displayItems = [...tickerItems, ...tickerItems]
 
@@ -233,7 +266,7 @@ export default function LiveTicker() {
       ref={dockRef}
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: 2, duration: 0.5 }}
+      transition={{ delay: 0.35, duration: 0.35 }}
       className="fixed bottom-0 left-0 right-0 z-30"
       onMouseEnter={handleDockMouseEnter}
     >
@@ -265,84 +298,48 @@ export default function LiveTicker() {
                   aria-label="Search feed"
                 />
               </div>
-              <button type="button" className="feed-close-btn" onClick={(e) => { e.stopPropagation(); closeFeed() }}>✕</button>
-            </div>
-
-            <div className="feed-tabs-row">
-              <div className="feed-tabs-scroll">
-                <button
-                  type="button"
-                  className={`feed-tab ${feedCategory === 'all' ? 'active' : ''}`}
-                  onClick={() => setFeedCategory('all')}
-                >
-                  All
-                </button>
-                {feedDimensionsInUse.map((dim) => (
-                  <button
-                    key={dim}
-                    type="button"
-                    className={`feed-tab ${feedCategory === dim ? 'active' : ''}`}
-                    onClick={() => setFeedCategory(dim)}
-                    style={{ '--feed-tab-accent': DIMENSION_COLORS[dim] || '#1a90ff' }}
-                  >
-                    <span className="feed-tab-icon" aria-hidden>{DIMENSION_ICONS[dim]}</span>
-                    {DIMENSION_LABELS[dim] || dim}
-                  </button>
-                ))}
-              </div>
+              <button
+                type="button"
+                className="feed-close-btn"
+                aria-label="Close feed"
+                onClick={(e) => { e.stopPropagation(); closeFeed() }}
+              >
+                <X size={13} />
+              </button>
             </div>
 
             <div className="feed-grid-scroll">
+              {signalItems.length === 0 && socialItems.length === 0 && (
+                <p className="feed-empty">No items match your search.</p>
+              )}
+
               <div className="feed-grid">
-                {filteredFeedItems.length === 0 && (
-                  <p className="feed-empty">No items match your search or category.</p>
-                )}
-                {filteredFeedItems.map((item) => (
-                  <button
-                    key={item.id}
-                    className="feed-card"
-                    onClick={() => handleItemClick(item)}
-                  >
-                    <div className="feed-card-stripe" style={{ background: item.color }} />
-                    {item.mediaType === 'video' && item.thumbnailUrl && (
-                      <div className="relative w-full h-24 overflow-hidden rounded-t" style={{ margin: '-12px -14px 8px -14px', width: 'calc(100% + 28px)' }}>
-                        <img src={item.thumbnailUrl} alt="" loading="lazy" className="w-full h-full object-cover" />
-                        {item.isLive && (
-                          <span
-                            className="absolute top-1.5 left-1.5 flex items-center gap-0.5 bg-red-600/90 text-white text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
-                            title="Live YouTube broadcast"
-                          >
-                            <span className="w-1 h-1 rounded-full bg-white animate-pulse" />
-                            LIVE
-                          </span>
-                        )}
-                      </div>
-                    )}
-                    <div className="feed-card-body">
-                      <div className="feed-card-meta">
-                        <span className="feed-card-cat" style={{ color: item.color }}>
-                          {item.isEvent
-                            ? `${DIMENSION_ICONS[item.dimension] || ''} ${DIMENSION_LABELS[item.dimension] || item.dimension}`
-                            : `${CATEGORIES[item.category]?.icon || ''} ${CATEGORIES[item.category]?.label || item.category}`
-                          }
-                        </span>
-                        {item.mediaType === 'video' && !item.thumbnailUrl && (
-                          <span style={{ fontSize: 9, color: item.isLive ? '#ef4444' : 'rgba(255,255,255,0.5)', marginLeft: 4 }}>
-                            {item.isLive ? '● LIVE' : '▶ VIDEO'}
-                          </span>
-                        )}
-                        <span className="feed-card-time">{timeAgo(item.time)}</span>
-                      </div>
-                      <h4 className="feed-card-title">{item.title}</h4>
-                      {item.description && <p className="feed-card-desc">{item.description}</p>}
-                      <div className="feed-card-source">
-                        <div className="feed-card-source-dot" style={{ backgroundColor: item.color }} />
-                        {item.source}
-                      </div>
-                    </div>
-                  </button>
+                {signalItems.map((item) => (
+                  <FeedCard key={item.id} item={item} onClick={() => handleItemClick(item)} />
                 ))}
               </div>
+
+              {socialItems.length > 0 && (
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    onClick={() => setSocialOpen((v) => !v)}
+                    aria-expanded={socialOpen}
+                    className="mb-2 inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 py-1.5 font-data text-[10px] uppercase tracking-[0.1em] text-muted transition-colors duration-150 hover:text-text"
+                  >
+                    {socialOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+                    Social / unverified
+                    <span className="text-faint">· {socialItems.length}</span>
+                  </button>
+                  {socialOpen && (
+                    <div className="feed-grid">
+                      {socialItems.map((item) => (
+                        <FeedCard key={item.id} item={item} onClick={() => handleItemClick(item)} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </motion.div>
         )}
@@ -368,9 +365,8 @@ export default function LiveTicker() {
       <div className="glass border-t border-white/5 ticker-shell">
         <div className={`ticker-hover-line ${feedOpen ? 'active' : ''}`} />
         <div
-          ref={scrollRef}
-          className="flex gap-6 px-4 py-2.5 overflow-hidden whitespace-nowrap"
-          style={{ scrollBehavior: 'auto' }}
+          className="ticker-track"
+          style={{ animationDuration: tickerDuration }}
         >
           {displayItems.map((item, i) => (
             <button
@@ -389,17 +385,14 @@ export default function LiveTicker() {
               ) : (
                 <div
                   className="w-1.5 h-1.5 rounded-full shrink-0"
-                  style={{ backgroundColor: item.color }}
+                  style={{ backgroundColor: SIGNAL_COLOR }}
                 />
               )}
-              <span className="text-[10px] text-white/55 font-mono">
+              <span className="font-data text-[9px] uppercase tracking-[0.06em] text-white/45">
                 {item.source}
               </span>
               <span
-                className={`text-[12px] font-medium truncate ${mobileMode ? 'max-w-[180px]' : 'max-w-[280px]'}`}
-                style={{
-                  color: 'rgba(255, 255, 255, 0.92)',
-                }}
+                className={`font-data text-[11px] text-white/85 truncate ${mobileMode ? 'max-w-[180px]' : 'max-w-[280px]'}`}
               >
                 {item.title}
               </span>

@@ -67,15 +67,11 @@ export const REGION_SEARCH_TERMS = {
   us: ['usa', 'united states', 'america', 'us'],
 }
 
-export const DEFAULT_SOURCES = [
-  { id: 'reuters', name: 'Reuters', type: 'source' },
-  { id: 'bbc-news', name: 'BBC News', type: 'source' },
-  { id: 'cnn', name: 'CNN', type: 'source' },
-  { id: 'associated-press', name: 'Associated Press', type: 'source' },
-  { id: 'al-jazeera-english', name: 'Al Jazeera', type: 'source' },
-  { id: 'bloomberg', name: 'Bloomberg', type: 'source' },
-  { id: 'the-times-of-india', name: 'Times of India', type: 'source' },
-]
+export const DEFAULT_SOURCES = NEWS_SOURCES.map((s) => ({
+  id: s.id,
+  name: s.name,
+  type: 'source',
+}))
 
 export function getSourcesByRegion(catalog) {
   const list = catalog && catalog.length > 0 ? catalog : NEWS_SOURCES

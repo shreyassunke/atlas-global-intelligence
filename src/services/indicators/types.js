@@ -2,7 +2,7 @@
  * Indicator adapter types — Tier C macro/micro data for place HUD.
  */
 
-/** @typedef {'worldbank' | 'fred' | 'finnhub' | 'openmeteo'} IndicatorSourceId */
+/** @typedef {'worldbank' | 'fred' | 'finnhub' | 'openmeteo' | 'census' | 'bea'} IndicatorSourceId */
 
 /**
  * @typedef {Object} PlaceIndicator

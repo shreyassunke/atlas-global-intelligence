@@ -1,27 +1,7 @@
-import { DIMENSION_LABELS, PRIORITY_LABELS, formatToneScore } from './eventSchema'
+import { DIMENSION_LABELS, formatToneScore } from './eventSchema'
 import { buildShareUrl } from './urlState'
 import { eventSourceToGlobeDataLayerKey, hasPreciseGeolocation } from './globeLayers'
-
-const TIME_FILTER_MAX_AGE_MS = {
-  live: 2 * 3600_000,
-  '24h': 24 * 3600_000,
-  '7d': 7 * 24 * 3600_000,
-  '30d': 30 * 24 * 3600_000,
-}
-
-function passesTimeFilter(evt, timeFilter) {
-  const maxAgeMs = TIME_FILTER_MAX_AGE_MS[timeFilter] ?? TIME_FILTER_MAX_AGE_MS.live
-  const now = Date.now()
-  const tsMs = evt.timestamp ? new Date(evt.timestamp).getTime() : NaN
-  const refMs = Number.isFinite(tsMs) ? tsMs : now
-  return now - refMs <= maxAgeMs
-}
-
-function passesPriorityFilter(evt, priorityFilter) {
-  if (priorityFilter === 'p1' && evt.priority !== 'p1') return false
-  if (priorityFilter === 'p1p2' && evt.priority === 'p3') return false
-  return true
-}
+import { passesAtlasTimeFilter, pinnedEventIds } from './atlasCycle'
 
 /**
  * Events visible on the globe under current HUD filters (mirrors useGlobeLayerEvents).
@@ -29,25 +9,26 @@ function passesPriorityFilter(evt, priorityFilter) {
  * @param {number} [limit=40]
  */
 export function getVisibleGlobeEvents(state, limit = 40) {
-  const { events, dataLayers, activeDimensions, priorityFilter, timeFilter } = state
+  const { events, dataLayers, activeDimensions, timeFilter, investigation } = state
   const dims = activeDimensions?.size ? activeDimensions : new Set(['safety', 'governance', 'economy', 'people', 'environment', 'narrative'])
   const list = []
+  const pinned = pinnedEventIds(investigation)
+  const now = Date.now()
 
   for (const evt of events) {
     if (evt.trackKind) continue
+    if (pinned.has(evt.id)) continue
     if (!hasPreciseGeolocation(evt)) continue
     const layerKey = eventSourceToGlobeDataLayerKey(evt)
     if (!layerKey || dataLayers?.[layerKey] === false) continue
     if (!dims.has(evt.dimension)) continue
-    if (!passesPriorityFilter(evt, priorityFilter)) continue
-    if (!passesTimeFilter(evt, timeFilter)) continue
+    if (!passesAtlasTimeFilter(evt, timeFilter, now)) continue
     list.push(evt)
   }
 
   list.sort((a, b) => {
-    const pr = { p1: 3, p2: 2, p3: 1 }
-    const pd = (pr[b.priority] || 0) - (pr[a.priority] || 0)
-    if (pd !== 0) return pd
+    const sd = (b.severity || 1) - (a.severity || 1)
+    if (sd !== 0) return sd
     return new Date(b.timestamp || 0) - new Date(a.timestamp || 0)
   })
 
@@ -63,7 +44,6 @@ export function buildBriefMarkdown(state) {
   const visible = getVisibleGlobeEvents(state, 50)
   const shareUrl = typeof window !== 'undefined' ? buildShareUrl({
     activeDimensions: state.activeDimensions,
-    priorityFilter: state.priorityFilter,
     timeFilter: state.timeFilter,
     dataLayers: state.dataLayers,
     globeMode: state.globeMode,
@@ -82,7 +62,6 @@ export function buildBriefMarkdown(state) {
     '',
     '## View context',
     `- Globe mode: ${state.globeMode || 'cesium'}`,
-    `- Priority filter: ${state.priorityFilter || 'all'}`,
     `- Time window: ${state.timeFilter || 'live'}`,
     `- Active dimensions: ${[...(state.activeDimensions || [])].join(', ') || 'all'}`,
     shareUrl ? `- Shareable link: ${shareUrl}` : '',
@@ -96,14 +75,13 @@ export function buildBriefMarkdown(state) {
   } else {
     for (const evt of visible) {
       const dim = DIMENSION_LABELS[evt.dimension] || evt.dimension
-      const pri = PRIORITY_LABELS[evt.priority] || evt.priority
       const tone = evt.tone != null ? formatToneScore(evt.tone) : '—'
       const loc = evt.location || evt.country || (evt.lat != null ? `${evt.lat.toFixed(2)}, ${evt.lng.toFixed(2)}` : '—')
       const approx = evt.latApproximate ? ' (~approx)' : ''
       const corr = evt.corroborationScore != null ? ` · corroboration ${evt.corroborationScore}` : ''
       lines.push(
         `### ${evt.title || 'Untitled'}`,
-        `- **${pri}** · ${dim} · ${evt.source || 'unknown'}`,
+        `- **Sev ${evt.severity || 1}** · ${dim} · ${evt.source || 'unknown'}`,
         `- Location: ${loc}${approx}`,
         `- Tone: ${tone}${corr}`,
         evt.url ? `- [Source](${evt.url})` : '',
@@ -185,10 +163,9 @@ export function buildDossierBriefMarkdown(d) {
   } else {
     for (const evt of d.signals.slice(0, 25)) {
       const dim = DIMENSION_LABELS[evt.dimension] || evt.dimension
-      const pri = PRIORITY_LABELS[evt.priority] || evt.priority
       const corr = evt.corroborationScore != null ? ` · corroboration ${Math.round(evt.corroborationScore * 100)}%` : ''
       lines.push(
-        `- **${evt.title || 'Untitled'}** — ${pri} · ${dim} · ${evt.source || 'unknown'}${corr}`,
+        `- **${evt.title || 'Untitled'}** — Sev ${evt.severity || 1} · ${dim} · ${evt.source || 'unknown'}${corr}`,
       )
     }
   }

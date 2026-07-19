@@ -9,7 +9,6 @@
  */
 import { useEffect, useMemo, useRef } from 'react'
 import { useAtlasStore } from '../../store/atlasStore'
-import { DIMENSION_COLORS, DIMENSION_ICONS } from '../../core/eventSchema'
 import { buildTriageRows } from '../../core/triage'
 
 const SEVERITY_COLORS = {
@@ -45,6 +44,7 @@ export default function TriageTab() {
   const eventMap = useAtlasStore((s) => s.eventMap)
   const anomalies = useAtlasStore((s) => s.anomalies)
   const surgeAlerts = useAtlasStore((s) => s.surgeAlerts)
+  const investigation = useAtlasStore((s) => s.investigation)
   const watchlists = useAtlasStore((s) => s.watchlists)
   const user = useAtlasStore((s) => s.user)
   const setSelectedEvent = useAtlasStore((s) => s.setSelectedEvent)
@@ -67,8 +67,9 @@ export default function TriageTab() {
       anomalies,
       surgeAlerts,
       lastSeenAt: sinceRef.current,
+      investigation,
     }),
-    [events, eventMap, anomalies, surgeAlerts],
+    [events, eventMap, anomalies, surgeAlerts, investigation],
   )
 
   const newCount = useMemo(() => rows.filter((r) => r.isNew).length, [rows])
@@ -108,7 +109,7 @@ export default function TriageTab() {
                 type="button"
                 className={`triage-row ${row.isNew ? 'is-new' : ''}`}
                 onClick={() => handleRowClick(row)}
-                style={{ '--row-accent': DIMENSION_COLORS[row.dimension] || 'rgba(255,255,255,0.25)' }}
+                style={{ '--row-accent': 'rgba(26, 144, 255, 0.55)' }}
               >
                 <span
                   className="triage-sev"
@@ -122,11 +123,6 @@ export default function TriageTab() {
                   <span className="triage-row-meta">
                     {row.isNew && <span className="triage-new-tag">NEW</span>}
                     <span className="triage-kind">{KIND_LABELS[row.kind] || row.kind}</span>
-                    {row.dimension && (
-                      <span className="triage-dim" style={{ color: DIMENSION_COLORS[row.dimension] }}>
-                        {DIMENSION_ICONS[row.dimension]}
-                      </span>
-                    )}
                     <span className="triage-time">{timeAgo(row.timestamp)}</span>
                   </span>
                   <span className="triage-title">{row.title}</span>

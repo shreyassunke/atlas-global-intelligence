@@ -23,13 +23,18 @@ export { buildHeatBins } from './heatBins'
 export {
   applyBackgroundClick,
   applyCountryClick,
+  applyCursorCoords,
   applyGlobeMapClick,
+  applyGlobeMapContextMenu,
   applyMarkerClick,
   applyMarkerHover,
+  clearCursorCoords,
   findChoroplethCountryAtPoint,
   markerClickIntent,
   resolveFlyToTarget,
+  resolveLocationInspectContext,
 } from './interactions'
+export { approxLatLngUnderPointer } from './screenToLatLng'
 export {
   isWorldZoom,
   MAX_GLOBE_MARKERS,

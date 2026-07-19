@@ -65,6 +65,10 @@
   padding-left: 332px;
 }
 
+.atlas-workstation-mode .hud-filters-sidebar {
+  display: none;
+}
+
 .hud-workspace-chip {
   display: inline-flex;
   align-items: center;
@@ -86,7 +90,7 @@
   height: 6px;
   border-radius: 50%;
   background: #00cfff;
-  box-shadow: 0 0 8px rgba(0, 207, 255, 0.8);
+  box-shadow: none;
   animation: ws-pulse 2s ease-in-out infinite;
 }
 
@@ -110,13 +114,13 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+  transition: background 0.15s, border-color 0.15s;
 }
 
 .hud-workspaces-pill:hover {
   background: rgba(0, 207, 255, 0.16);
   border-color: rgba(0, 207, 255, 0.55);
-  box-shadow: 0 0 16px rgba(0, 207, 255, 0.15);
+  box-shadow: none;
 }
 
 .hud-workspaces-pill--active {
@@ -246,9 +250,7 @@
   background: rgba(255, 255, 255, 0.15);
 }
 
-.ws-timeline__sev--p1 { background: var(--priority-p1); }
-.ws-timeline__sev--p2 { background: var(--priority-p2); }
-.ws-timeline__sev--p3 { background: var(--priority-p3); }
+
 
 .ws-timeline__content {
   min-width: 0;

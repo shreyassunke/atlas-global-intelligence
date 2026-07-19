@@ -1,5 +1,24 @@
 import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import {
+  Inbox,
+  Layers,
+  Settings,
+  MoreHorizontal,
+  RotateCw,
+  Eye,
+  EyeOff,
+  Compass,
+  Crosshair,
+  LayoutGrid,
+  Search,
+  Link as LinkIcon,
+  FileDown,
+  FileText,
+  PersonStanding,
+  Radar,
+  X,
+} from 'lucide-react'
 import { useAtlasStore } from '../../store/atlasStore'
 import SourceSearch from '../Onboarding/SourceSearch'
 import HeaderUserMenu from './HeaderUserMenu'
@@ -8,132 +27,17 @@ import { AtlasWordmark } from './AtlasWordmark'
 import { MissionClock } from './MissionClock'
 import { copyShareUrl } from '../../core/urlState'
 import { buildBriefMarkdown, downloadMarkdownBrief, exportBriefPdf } from '../../core/briefExport'
-import { DIMENSIONS, DIMENSION_COLORS, DIMENSION_LABELS, DIMENSION_ICONS } from '../../core/eventSchema'
-import { countUnseenP1 } from '../../core/triage'
+import { countUnseenHighSeverity } from '../../core/triage'
 
-/** Inbox tray — the Triage feed ("what changed since you looked"). */
-const IconTriage = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
-    <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
-  </svg>
-)
+const ICON_SIZE = 14
 
-const IconLayers = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <polygon points="12 2 2 7 12 12 22 7 12 2" />
-    <polyline points="2 17 12 22 22 17" />
-    <polyline points="2 12 12 17 22 12" />
-  </svg>
-)
-
-const IconSettings = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="12" cy="12" r="3" />
-    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-  </svg>
-)
-
-const IconMore = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="12" cy="12" r="1" />
-    <circle cx="19" cy="12" r="1" />
-    <circle cx="5" cy="12" r="1" />
-  </svg>
-)
-
-const IconRefresh = () => (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <polyline points="23 4 23 10 17 10" />
-    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-  </svg>
-)
-
-const IconEye = () => (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-    <circle cx="12" cy="12" r="3" />
-  </svg>
-)
-
-const IconEyeOff = () => (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
-    <line x1="1" y1="1" x2="23" y2="23" />
-  </svg>
-)
-
-const IconCompass = () => (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="12" cy="12" r="10" />
-    <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
-  </svg>
-)
-
-/** Crosshair / “recenter” — distinct from refresh (circular arrow) and filter. */
-const IconResetView = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-    <circle cx="12" cy="12" r="3" />
-    <line x1="12" y1="2" x2="12" y2="7" />
-    <line x1="12" y1="17" x2="12" y2="22" />
-    <line x1="2" y1="12" x2="7" y2="12" />
-    <line x1="17" y1="12" x2="22" y2="12" />
-  </svg>
-)
-
-const IconWorkspaces = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="3" y="3" width="7" height="7" rx="1" />
-    <rect x="14" y="3" width="7" height="7" rx="1" />
-    <rect x="3" y="14" width="7" height="7" rx="1" />
-    <rect x="14" y="14" width="7" height="7" rx="1" />
-  </svg>
-)
-
-const IconSearch = () => (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="11" cy="11" r="8" />
-    <line x1="21" y1="21" x2="16.65" y2="16.65" />
-  </svg>
-)
-
-const IconSetup = () => (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
-  </svg>
-)
-
-const DIMENSION_DEFS = Object.values(DIMENSIONS).map((dim) => ({
-  id: dim,
-  label: DIMENSION_LABELS[dim],
-  icon: DIMENSION_ICONS[dim],
-  color: DIMENSION_COLORS[dim],
-}))
-
-const PRIORITY_OPTIONS = [
-  { value: 'p1', label: 'P1', description: 'Breaking only' },
-  { value: 'p1p2', label: 'P1+P2', description: 'Breaking + Active' },
-  { value: 'all', label: 'All', description: 'Everything' },
-]
-
-const TIME_OPTIONS = [
-  { value: 'live', label: 'Live', title: 'Last 2 hours of geocoded signals' },
-  { value: '24h', label: '24h', title: 'Events from the past 24 hours' },
-  { value: '7d', label: '7d', title: 'Events from the past 7 days' },
-  { value: '30d', label: '30d', title: 'Events from the past 30 days' },
-]
-
-/** Phase 3 — compact dimension chips + one global time control under the header. */
-function FilterStrip() {
-  const activeDimensions = useAtlasStore((s) => s.activeDimensions)
-  const toggleDimension = useAtlasStore((s) => s.toggleDimension)
-  const priorityFilter = useAtlasStore((s) => s.priorityFilter)
-  const setPriorityFilter = useAtlasStore((s) => s.setPriorityFilter)
-  const timeFilter = useAtlasStore((s) => s.timeFilter)
-  const setTimeFilter = useAtlasStore((s) => s.setTimeFilter)
+/** Street View control — only rendered in workspace or mobile mode. */
+function FilterStrip({ inWorkspace = false }) {
   const streetViewMode = useAtlasStore((s) => s.streetViewMode)
   const toggleStreetViewMode = useAtlasStore((s) => s.toggleStreetViewMode)
   const mobileMode = useAtlasStore((s) => s.mobileMode)
+
+  if (!(inWorkspace || mobileMode)) return null
 
   return (
     <motion.div
@@ -142,57 +46,8 @@ function FilterStrip() {
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 1.7, duration: 0.5 }}
       role="toolbar"
-      aria-label="Dimension and time filters"
+      aria-label="View controls"
     >
-      {DIMENSION_DEFS.map((d) => {
-        const active = activeDimensions.has(d.id)
-        return (
-          <button
-            key={d.id}
-            type="button"
-            className={`hud-dim-chip ${active ? 'active' : ''}`}
-            style={{ '--chip-color': d.color }}
-            onClick={() => toggleDimension(d.id)}
-            title={`${d.label} — ${active ? 'on' : 'off'}`}
-          >
-            <span className="hud-dim-chip-dot" style={{ backgroundColor: d.color }} />
-            {mobileMode ? d.icon : d.label}
-          </button>
-        )
-      })}
-
-      <span className="hud-strip-divider" aria-hidden />
-
-      <div className="hud-strip-group" role="group" aria-label="Priority filter">
-        {PRIORITY_OPTIONS.map((opt) => (
-          <button
-            key={opt.value}
-            type="button"
-            className={`hud-strip-btn ${priorityFilter === opt.value ? 'active' : ''}`}
-            onClick={() => setPriorityFilter(opt.value)}
-            title={opt.description}
-          >
-            {opt.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="hud-strip-group" role="group" aria-label="Time range">
-        {TIME_OPTIONS.map((opt) => (
-          <button
-            key={opt.value}
-            type="button"
-            className={`hud-strip-btn ${timeFilter === opt.value ? 'active' : ''}`}
-            onClick={() => setTimeFilter(opt.value)}
-            title={opt.title}
-          >
-            {opt.label}
-          </button>
-        ))}
-      </div>
-
-      <span className="hud-strip-divider" aria-hidden />
-
       <button
         type="button"
         className={`hud-strip-btn hud-strip-btn--streetview${streetViewMode ? ' active' : ''}`}
@@ -212,7 +67,6 @@ export default function Header({ hudHidden = false, onToggleHud, inWorkspace = f
   const workbench = useAtlasStore((s) => s.ui.workbench)
   const toggleWorkbench = useAtlasStore((s) => s.toggleWorkbench)
   const resetView = useAtlasStore((s) => s.resetView)
-  const reopenOnboarding = useAtlasStore((s) => s.reopenOnboarding)
   const reopenLanding = useAtlasStore((s) => s.reopenLanding)
   const triggerManualRefresh = useAtlasStore((s) => s.triggerManualRefresh)
   const manualRefreshUsedToday = useAtlasStore((s) => s.manualRefreshUsedToday)
@@ -224,18 +78,20 @@ export default function Header({ hudHidden = false, onToggleHud, inWorkspace = f
   const exitWorkspace = useAtlasStore((s) => s.exitWorkspace)
   const openCanvas = useAtlasStore((s) => s.openCanvas)
   const setAppView = useAtlasStore((s) => s.setAppView)
+  const streetViewMode = useAtlasStore((s) => s.streetViewMode)
+  const toggleStreetViewMode = useAtlasStore((s) => s.toggleStreetViewMode)
   const activeWorkspace = workspaces.find((w) => w.id === activeWorkspaceId)
   const [moreOpen, setMoreOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const pushToast = useAtlasStore((s) => s.pushToast)
   const openReportExport = useAtlasStore((s) => s.openReportExport)
-  const unseenTriage = useAtlasStore((s) => countUnseenP1(s.events, s.triageLastSeenAt))
+  const unseenTriage = useAtlasStore((s) =>
+    countUnseenHighSeverity(s.events, s.triageLastSeenAt, undefined, s.investigation))
 
   const handleCopyShareLink = async () => {
     const state = useAtlasStore.getState()
     const ok = await copyShareUrl({
       activeDimensions: state.activeDimensions,
-      priorityFilter: state.priorityFilter,
       timeFilter: state.timeFilter,
       dataLayers: state.dataLayers,
       globeMode: state.globeMode,
@@ -368,7 +224,7 @@ export default function Header({ hudHidden = false, onToggleHud, inWorkspace = f
                   onClick={openCanvas}
                   title="Investigation canvas"
                 >
-                  <IconCompass />
+                  <Compass size={ICON_SIZE} />
                 </button>
               )}
 
@@ -377,10 +233,19 @@ export default function Header({ hudHidden = false, onToggleHud, inWorkspace = f
                 className={`hud-icon-btn hud-icon-btn-badged ${workbench === 'triage' ? 'active' : ''}`}
                 title="Triage — what changed since you looked"
               >
-                <IconTriage />
+                <Inbox size={ICON_SIZE} />
                 {unseenTriage > 0 && (
                   <span className="hud-icon-badge">{unseenTriage > 99 ? '99+' : unseenTriage}</span>
                 )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => toggleWorkbench('analytics')}
+                className={`hud-icon-btn ${workbench === 'analytics' ? 'active' : ''}`}
+                title="Analytics"
+              >
+                <Radar size={ICON_SIZE} />
               </button>
 
               <button
@@ -388,7 +253,7 @@ export default function Header({ hudHidden = false, onToggleHud, inWorkspace = f
                 className={`hud-icon-btn ${workbench === 'layers' ? 'active' : ''}`}
                 title="Globe layers"
               >
-                <IconLayers />
+                <Layers size={ICON_SIZE} />
               </button>
 
               <button
@@ -396,8 +261,22 @@ export default function Header({ hudHidden = false, onToggleHud, inWorkspace = f
                 className={`hud-icon-btn ${workbench === 'settings' ? 'active' : ''}`}
                 title="Settings"
               >
-                <IconSettings />
+                <Settings size={ICON_SIZE} />
               </button>
+
+              {!inWorkspace && (
+                <button
+                  type="button"
+                  className={`hud-icon-btn ${streetViewMode ? 'active' : ''}`}
+                  onClick={toggleStreetViewMode}
+                  title={streetViewMode
+                    ? 'Street View mode on — click globe for panorama (click to disable)'
+                    : 'Enable Street View mode — then click the globe to open a panorama'}
+                  aria-label="Toggle Street View mode"
+                >
+                  <PersonStanding size={ICON_SIZE} />
+                </button>
+              )}
 
               <button
                 type="button"
@@ -406,7 +285,7 @@ export default function Header({ hudHidden = false, onToggleHud, inWorkspace = f
                 title="Reset globe to default overview"
                 aria-label="Reset globe view to default overview"
               >
-                <IconResetView />
+                <Crosshair size={ICON_SIZE} />
               </button>
             </>
           )}
@@ -432,7 +311,7 @@ export default function Header({ hudHidden = false, onToggleHud, inWorkspace = f
               className={`hud-icon-btn ${moreOpen ? 'active' : ''}`}
               title="More actions"
             >
-              <IconMore />
+              <MoreHorizontal size={ICON_SIZE} />
             </button>
 
             <AnimatePresence>
@@ -455,7 +334,7 @@ export default function Header({ hudHidden = false, onToggleHud, inWorkspace = f
                           setMoreOpen(false)
                         }}
                       >
-                        <IconWorkspaces />
+                        <LayoutGrid size={ICON_SIZE} />
                         <span>{inWorkspace ? 'Back to workspaces' : 'Workspaces — create & open'}</span>
                       </button>
                       <div className="hud-dropdown-divider" />
@@ -467,7 +346,7 @@ export default function Header({ hudHidden = false, onToggleHud, inWorkspace = f
                         className={`hud-dropdown-item ${workbench === 'triage' ? 'is-active' : ''}`}
                         onClick={() => { toggleWorkbench('triage'); setMoreOpen(false) }}
                       >
-                        <IconTriage />
+                        <Inbox size={ICON_SIZE} />
                         <span>Triage</span>
                         {unseenTriage > 0 && (
                           <span className="hud-dropdown-badge">{unseenTriage > 99 ? '99+' : unseenTriage}</span>
@@ -477,14 +356,14 @@ export default function Header({ hudHidden = false, onToggleHud, inWorkspace = f
                         className={`hud-dropdown-item ${workbench === 'layers' ? 'is-active' : ''}`}
                         onClick={() => { toggleWorkbench('layers'); setMoreOpen(false) }}
                       >
-                        <IconLayers />
+                        <Layers size={ICON_SIZE} />
                         <span>Globe Layers</span>
                       </button>
                       <button
                         className={`hud-dropdown-item ${workbench === 'settings' ? 'is-active' : ''}`}
                         onClick={() => { toggleWorkbench('settings'); setMoreOpen(false) }}
                       >
-                        <IconSettings />
+                        <Settings size={ICON_SIZE} />
                         <span>Settings</span>
                       </button>
                       <div className="hud-dropdown-divider" />
@@ -494,14 +373,14 @@ export default function Header({ hudHidden = false, onToggleHud, inWorkspace = f
                     className="hud-dropdown-item"
                     onClick={() => { resetView(); setMoreOpen(false) }}
                   >
-                    <IconCompass />
+                    <Crosshair size={ICON_SIZE} />
                     <span>Reset View</span>
                   </button>
                   <button
                     className="hud-dropdown-item"
                     onClick={() => { onToggleHud?.(); setMoreOpen(false) }}
                   >
-                    {hudHidden ? <IconEye /> : <IconEyeOff />}
+                    {hudHidden ? <Eye size={ICON_SIZE} /> : <EyeOff size={ICON_SIZE} />}
                     <span>{hudHidden ? 'Show HUD' : 'Hide HUD'}</span>
                     <span className="hud-dropdown-shortcut">F</span>
                   </button>
@@ -509,28 +388,28 @@ export default function Header({ hudHidden = false, onToggleHud, inWorkspace = f
                     className="hud-dropdown-item"
                     onClick={handleCopyShareLink}
                   >
-                    <IconSearch />
+                    <LinkIcon size={ICON_SIZE} />
                     <span>Copy Share Link</span>
                   </button>
                   <button
                     className="hud-dropdown-item"
                     onClick={handleExportMarkdown}
                   >
-                    <IconSearch />
+                    <FileDown size={ICON_SIZE} />
                     <span>Export Brief (Markdown)</span>
                   </button>
                   <button
                     className="hud-dropdown-item"
                     onClick={handleExportPdf}
                   >
-                    <IconSearch />
+                    <FileDown size={ICON_SIZE} />
                     <span>Export Brief (PDF)</span>
                   </button>
                   <button
                     className="hud-dropdown-item"
                     onClick={() => { openReportExport(); setMoreOpen(false) }}
                   >
-                    <IconSearch />
+                    <FileText size={ICON_SIZE} />
                     <span>Export Report (Templates)</span>
                   </button>
                   <div className="hud-dropdown-divider" />
@@ -539,23 +418,16 @@ export default function Header({ hudHidden = false, onToggleHud, inWorkspace = f
                     onClick={() => { triggerManualRefresh?.(); setMoreOpen(false) }}
                     disabled={manualRefreshUsedToday || isLoading}
                   >
-                    <IconRefresh />
+                    <RotateCw size={ICON_SIZE} />
                     <span>Refresh Data</span>
                   </button>
                   <button
                     className="hud-dropdown-item"
                     onClick={() => { setSearchOpen(true); setMoreOpen(false) }}
                   >
-                    <IconSearch />
+                    <Search size={ICON_SIZE} />
                     <span>News Sources</span>
                     <span className="hud-dropdown-badge">{selectedSources.length}</span>
-                  </button>
-                  <button
-                    className="hud-dropdown-item"
-                    onClick={() => { reopenOnboarding(); setMoreOpen(false) }}
-                  >
-                    <IconSetup />
-                    <span>Setup</span>
                   </button>
                 </motion.div>
               )}
@@ -565,7 +437,7 @@ export default function Header({ hudHidden = false, onToggleHud, inWorkspace = f
         </div>
       </motion.header>
 
-      <FilterStrip />
+      <FilterStrip inWorkspace={inWorkspace} />
 
       {/* Source search panel */}
       <AnimatePresence>
@@ -580,8 +452,12 @@ export default function Header({ hudHidden = false, onToggleHud, inWorkspace = f
           >
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-white tracking-wide">Manage Sources</h3>
-              <button onClick={() => setSearchOpen(false)} className="text-white/40 hover:text-white transition-colors cursor-pointer text-lg leading-none">
-                ×
+              <button
+                onClick={() => setSearchOpen(false)}
+                aria-label="Close source search"
+                className="inline-flex items-center justify-center text-white/40 hover:text-white transition-colors cursor-pointer"
+              >
+                <X size={16} />
               </button>
             </div>
             <SourceSearch compact />

@@ -3,12 +3,18 @@ import {
   mergeCrossSource,
   initializeCorroborationFields,
 } from '../core/crossSourceMerge.js'
+import { isWithinAtlasCycle } from '../core/atlasCycle.js'
 
 // Phase 1b: 8000 → 4000 — CAMEO pins are gated in the fetch worker now, so the
 // buffer no longer needs headroom for the raw 5k-row firehose per tick.
 const RING_BUFFER_SIZE = 4000
 const BATCH_INTERVAL = 200
 const SEV5_IMMUNITY_MS = 86400_000
+
+function isLiveTrack(evt) {
+  const k = evt?.trackKind
+  return k === 'aircraft' || k === 'satellite' || k === 'vessel' || k === 'storm'
+}
 
 let events = []
 let eventMap = new Map()
@@ -58,8 +64,14 @@ function removeStale() {
   const toRemove = []
   for (let i = events.length - 1; i >= 0; i--) {
     const evt = events[i]
+    // Hard 24h cycle on event timestamp — re-fetch must not keep old stories alive.
+    if (!isLiveTrack(evt) && !isWithinAtlasCycle(evt, now)) {
+      toRemove.push(i)
+      continue
+    }
     const age = (now - new Date(evt.fetchedAt).getTime()) / 1000
     if (age > evt.ttl) {
+      // Sev5 can outlive per-source TTL for up to 24h from fetch — never past publication cycle.
       if (evt.severity === 5 && (now - new Date(evt.fetchedAt).getTime()) < SEV5_IMMUNITY_MS) continue
       toRemove.push(i)
     }
@@ -270,8 +282,21 @@ function runAnomalyRules(newEvents) {
 
 function ingestEvents(incoming) {
   const newEvents = []
+  const now = Date.now()
 
   for (const event of incoming) {
+    // Drop / expire anything outside the 24h publication cycle.
+    if (!isLiveTrack(event) && !isWithinAtlasCycle(event, now)) {
+      const byId = eventMap.get(event.id)
+      if (byId) {
+        const idx = events.indexOf(byId)
+        if (idx >= 0) events.splice(idx, 1)
+        eventMap.delete(event.id)
+        batchQueue.removed.push(event.id)
+      }
+      continue
+    }
+
     const byId = eventMap.get(event.id)
     if (byId) {
       const preserved = {
@@ -281,7 +306,10 @@ function ingestEvents(incoming) {
         correlatedEventIds: byId.correlatedEventIds,
         toneDisagreement: byId.toneDisagreement,
       }
+      // Keep original publication timestamp — never let re-poll rewrite age.
+      const publishedAt = byId.timestamp || event.timestamp
       Object.assign(byId, event, {
+        timestamp: publishedAt,
         fetchedAt: event.fetchedAt || new Date().toISOString(),
       })
       if (!event.sourceReports?.length && preserved.sourceReports?.length) {
@@ -303,6 +331,9 @@ function ingestEvents(incoming) {
 
     const existing = findCrossSourceDuplicate(event, events)
     if (existing) {
+      if (!isLiveTrack(existing) && !isWithinAtlasCycle(existing, now)) {
+        continue
+      }
       mergeCrossSource(existing, event, {
         onPriorityUpgrade: (evt, from) => {
           batchQueue.anomalies.push({
@@ -325,6 +356,7 @@ function ingestEvents(incoming) {
   }
 
   cullOldest()
+  removeStale()
 
   const anomalies = runAnomalyRules(newEvents)
   if (anomalies.length > 0) {
@@ -356,14 +388,6 @@ function getSnapshot() {
   return events.map(e => ({ ...e }))
 }
 
-function getPriorityCounts() {
-  const counts = { p3: 0, p2: 0, p1: 0 }
-  for (const e of events) {
-    const pri = e.priority || e.priority || 'p3'
-    if (counts[pri] !== undefined) counts[pri]++
-  }
-  return counts
-}
 
 self.onmessage = function (msg) {
   const { type, payload } = msg.data
@@ -375,9 +399,7 @@ self.onmessage = function (msg) {
       self.postMessage({ type: 'SNAPSHOT', events: getSnapshot() })
       break
     case 'GET_TIER_COUNTS':
-    case 'GET_PRIORITY_COUNTS':
-      self.postMessage({ type: 'PRIORITY_COUNTS', counts: getPriorityCounts() })
-      break
+    
     case 'START':
       startBatchTimer()
       break

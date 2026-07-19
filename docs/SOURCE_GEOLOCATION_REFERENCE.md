@@ -65,6 +65,7 @@ Tactical track events (`trackKind`: `aircraft`, `satellite`, `vessel`, `storm`) 
 | `firms` | NASA FIRMS | Satellite fire detection lat/lng | `false` | ✅ `firms` layer | Requires `FIRMS_KEY` |
 | `opensky` | OpenSky ADS-B | Live aircraft position | `false` | ✅ `adsb` layer | Tactical track, not static pin |
 | `aisstream` | AISStream Vessels | Live vessel position | `false` | ✅ `ais` layer | Requires AISStream key; tactical track |
+| `cameras` | Live Cameras | Public webcam / CCTV pin | `false` | ✅ `cameras` layer | Windy (keyed) + TfL + Caltrans via `/api/cameras` |
 | `noaa-nhc` | NOAA NHC Hurricanes | Storm center + track/cone | `false` | ✅ `nhcStorms` layer | Tactical storm track |
 | `safecast` | Safecast | Radiation sensor lat/lng | `false` | ❌ Not mapped | Precise but ticker-only today |
 

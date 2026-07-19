@@ -35,6 +35,7 @@ export const URL_LAYER_DEFAULTS = {
   adsbMilitary: true,
   satellites: false,
   ais: false,
+  cameras: false,
   nhcStorms: false,
   windOverlay: false,
 }
@@ -80,7 +81,6 @@ function decodeLayerDeltas(base, on = [], off = []) {
 /**
  * @param {Object} state
  * @param {Set|Array} state.activeDimensions
- * @param {string} state.priorityFilter
  * @param {string} state.timeFilter
  * @param {Record<string, boolean>} state.dataLayers
  * @param {string} state.globeMode
@@ -95,7 +95,6 @@ function decodeLayerDeltas(base, on = [], off = []) {
 export function serializeAtlasUrlState(state) {
   const params = serializeFilters({
     activeDimensions: state.activeDimensions,
-    priorityFilter: state.priorityFilter,
     timeFilter: state.timeFilter,
   })
 

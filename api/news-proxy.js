@@ -1,7 +1,8 @@
 /**
- * GET /api/news-proxy?provider=newsapi|gnews|thenewsapi|youtube&...
+ * GET /api/news-proxy?provider=newsapi|gnews|thenewsapi|youtube|apitube&...
  *
  * Server-side news/YouTube proxy — keeps API keys off the client and avoids CORS.
+ * APITube `/v1/news/local` supports lat/lng/radius for micro-local enrichment.
  */
 
 import {
@@ -22,6 +23,7 @@ const PROVIDER_BASE = {
   gnews: 'https://gnews.io/api/v4',
   thenewsapi: 'https://api.thenewsapi.com/v1',
   youtube: 'https://www.googleapis.com/youtube/v3',
+  apitube: 'https://api.apitube.io/v1',
 }
 
 const CACHE_SEC = {
@@ -29,6 +31,7 @@ const CACHE_SEC = {
   gnews: 300,
   thenewsapi: 300,
   youtube: 600,
+  apitube: 300,
 }
 
 function providerKey(provider, params) {
@@ -48,6 +51,8 @@ function resolveApiKey(provider) {
       return envFirst('THENEWSAPI_KEY', 'THENEWS_API_KEY', 'VITE_THENEWS_API_KEY', 'VITE_THENEWS_API_KEYS')?.split(',')[0]?.trim() || ''
     case 'youtube':
       return envFirst('YOUTUBE_API_KEY', 'GOOGLE_YOUTUBE_API_KEY', 'VITE_YOUTUBE_API_KEY', 'VITE_GOOGLE_MAPS_API_KEY') || ''
+    case 'apitube':
+      return envFirst('APITUBE_KEY', 'APITUBE_API_KEY', 'VITE_APITUBE_KEY') || ''
     default:
       return ''
   }
@@ -80,6 +85,17 @@ function buildUpstreamUrl(provider, searchParams) {
   if (provider === 'youtube') {
     params.set('key', apiKey)
     return { url: `${PROVIDER_BASE.youtube}/search?${params}` }
+  }
+
+  if (provider === 'apitube') {
+    params.set('api_key', apiKey)
+    // Local endpoint: lat/lng/radius (or place). Strip unrelated params.
+    const local = new URLSearchParams()
+    for (const key of ['lat', 'lng', 'radius', 'place', 'country', 'sort', 'ranking']) {
+      if (params.has(key)) local.set(key, params.get(key))
+    }
+    local.set('api_key', apiKey)
+    return { url: `${PROVIDER_BASE.apitube}/news/local?${local}` }
   }
 
   return { error: 'unknown provider', status: 400 }

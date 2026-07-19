@@ -404,6 +404,107 @@ export function geocodeQuery(query, countryHint) {
   })
 }
 
+/**
+ * Reverse-geocode a lat/lng into a city → county → state → country hierarchy.
+ * Prefers Google Geocoder (same stack as Map3D / Places); falls back to Nominatim.
+ *
+ * @param {number} lat
+ * @param {number} lng
+ * @param {{ signal?: AbortSignal }} [opts]
+ * @returns {Promise<import('./placeHierarchy.js').PlaceHierarchy|null>}
+ */
+export async function reverseGeocodeLatLng(lat, lng, { signal } = {}) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+
+  const fromGoogle = await reverseGeocodeGoogle(lat, lng).catch(() => null)
+  if (fromGoogle) return fromGoogle
+
+  if (signal?.aborted) return null
+  return reverseGeocodeNominatim(lat, lng, { signal })
+}
+
+async function reverseGeocodeGoogle(lat, lng) {
+  const { buildPlaceHierarchy } = await import('./placeHierarchy.js')
+  const maps = await loadGoogleMapsSDK()
+  const geocoder = new maps.Geocoder()
+  const response = await geocoder.geocode({ location: { lat, lng } })
+  const results = response?.results
+  if (!Array.isArray(results) || !results.length) return null
+
+  // Prefer a result that carries locality / admin components over pure plus-codes.
+  const result =
+    results.find((r) =>
+      (r.address_components || []).some((c) =>
+        c.types?.includes('locality')
+        || c.types?.includes('administrative_area_level_2')
+        || c.types?.includes('administrative_area_level_1'),
+      ))
+    || results[0]
+
+  const comps = result.address_components || []
+  const pick = (...types) => {
+    for (const type of types) {
+      const hit = comps.find((c) => c.types?.includes(type))
+      if (hit?.long_name) return hit.long_name
+    }
+    return null
+  }
+  const pickShort = (...types) => {
+    for (const type of types) {
+      const hit = comps.find((c) => c.types?.includes(type))
+      if (hit?.short_name) return hit.short_name
+    }
+    return null
+  }
+
+  return buildPlaceHierarchy({
+    city: pick('locality', 'postal_town', 'sublocality_level_1', 'sublocality', 'neighborhood'),
+    county: pick('administrative_area_level_2'),
+    state: pick('administrative_area_level_1'),
+    country: pick('country'),
+    countryCode: pickShort('country'),
+    formattedAddress: result.formatted_address || '',
+    source: 'google-reverse',
+  })
+}
+
+async function reverseGeocodeNominatim(lat, lng, { signal } = {}) {
+  const { buildPlaceHierarchy } = await import('./placeHierarchy.js')
+  const url =
+    'https://nominatim.openstreetmap.org/reverse?' +
+    new URLSearchParams({
+      lat: String(lat),
+      lon: String(lng),
+      format: 'json',
+      addressdetails: '1',
+      zoom: '14',
+      'accept-language': 'en',
+    }).toString()
+
+  try {
+    const res = await fetch(url, {
+      headers: { Accept: 'application/json' },
+      signal,
+    })
+    if (!res.ok) return null
+    const hit = await res.json()
+    const addr = hit?.address
+    if (!addr) return null
+
+    return buildPlaceHierarchy({
+      city: addr.city || addr.town || addr.village || addr.municipality || addr.suburb || null,
+      county: addr.county || addr.city_district || null,
+      state: addr.state || addr.region || addr.province || null,
+      country: addr.country || null,
+      countryCode: addr.country_code || null,
+      formattedAddress: hit.display_name || '',
+      source: 'nominatim-reverse',
+    })
+  } catch {
+    return null
+  }
+}
+
 export function extractLocationHints(title, detail) {
   if (!title) return []
 

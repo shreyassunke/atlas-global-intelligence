@@ -78,7 +78,7 @@ export function initEventBus() {
       for (const fn of subscribers) fn({ snapshot })
     }
     if (type === 'PRIORITY_COUNTS') {
-      for (const fn of subscribers) fn({ priorityCounts: msg.data.counts })
+      
     }
   }
 
@@ -202,9 +202,6 @@ export function requestSnapshot() {
   if (eventBusWorker) eventBusWorker.postMessage({ type: 'GET_SNAPSHOT' })
 }
 
-export function requestPriorityCounts() {
-  if (eventBusWorker) eventBusWorker.postMessage({ type: 'GET_PRIORITY_COUNTS' })
-}
 
 export function getSourceStatuses() {
   return { ...sourceStatuses }

@@ -2,26 +2,26 @@
  * Inspector content — commercial news marker detail (former NewsCard body).
  */
 import { useAtlasStore } from '../../store/atlasStore'
-import { CATEGORIES } from '../../utils/categoryColors'
 import { extractYouTubeVideoId } from '../../utils/youtube'
 import { buildGdeltDocQuery } from '../../services/gdelt/analyticsService'
+import { cleanEventText } from '../../utils/text.js'
+import { InspectorWindowControls, useInspectorWindow } from './InspectorWindowContext'
+import { cn } from '../../lib/utils'
 
 export default function NewsContent({ marker, onClose }) {
   const openStreetView = useAtlasStore((s) => s.openStreetView)
   const openYouTubeEmbed = useAtlasStore((s) => s.openYouTubeEmbed)
   const openGdeltAnalytics = useAtlasStore((s) => s.openGdeltAnalytics)
+  const windowApi = useInspectorWindow()
 
   return (
-    <div className="relative p-5 space-y-4">
-      {/* Close button */}
-      <button
-        onClick={onClose}
-        className="absolute top-4 right-4 z-10 text-slate-400 hover:text-white transition-colors cursor-pointer"
-      >
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-        </svg>
-      </button>
+    <div
+      className={cn('relative p-5 space-y-4', windowApi && 'inspector-panel__drag-header')}
+      onPointerDown={windowApi?.onDragHandlePointerDown}
+    >
+      <div className="absolute top-3 right-3 z-10">
+        <InspectorWindowControls />
+      </div>
 
       {/* Video thumbnail — click opens in-app embed (same pattern as Street View overlay) */}
       {marker.mediaType === 'video' && marker.thumbnailUrl && (
@@ -66,33 +66,29 @@ export default function NewsContent({ marker, onClose }) {
         </button>
       )}
 
-      {/* Category badge */}
-      <div className="flex items-center gap-2">
-        <div
-          className="w-2 h-2 rounded-full shadow-[0_0_8px_rgba(255,255,255,0.5)]"
-          style={{ backgroundColor: CATEGORIES[marker.category]?.color || '#3b82f6', boxShadow: `0 0 8px ${CATEGORIES[marker.category]?.color || '#3b82f6'}` }}
-        />
-        <span className="text-[11px] font-bold uppercase tracking-widest text-slate-300">
-          {CATEGORIES[marker.category]?.label || marker.category}
-        </span>
-        {marker.mediaType === 'video' && !marker.thumbnailUrl && (
-          <span className="text-[10px] font-bold uppercase tracking-wider text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded px-1.5 py-0.5 leading-none">
-            {marker.isLive ? 'LIVE' : 'VIDEO'}
-          </span>
-        )}
-        {(marker.corroborationCount >= 2 || (marker.corroborationScore ?? 0) >= 0.25) && (
-          <span
-            className="text-[10px] font-bold uppercase tracking-wider text-emerald-300/90 bg-emerald-500/10 border border-emerald-500/25 rounded px-1.5 py-0.5 leading-none"
-            title={`${marker.corroborationCount} independent feed(s) · score ${Math.round((marker.corroborationScore ?? 0) * 100)}%`}
-          >
-            ✓ {marker.corroborationCount} src
-          </span>
-        )}
-      </div>
+      {(marker.mediaType === 'video' && !marker.thumbnailUrl) ||
+      marker.corroborationCount >= 2 ||
+      (marker.corroborationScore ?? 0) >= 0.25 ? (
+        <div className="flex items-center gap-2">
+          {marker.mediaType === 'video' && !marker.thumbnailUrl && (
+            <span className="text-[10px] font-bold uppercase tracking-wider text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded px-1.5 py-0.5 leading-none">
+              {marker.isLive ? 'LIVE' : 'VIDEO'}
+            </span>
+          )}
+          {(marker.corroborationCount >= 2 || (marker.corroborationScore ?? 0) >= 0.25) && (
+            <span
+              className="text-[10px] font-bold uppercase tracking-wider text-emerald-300/90 bg-emerald-500/10 border border-emerald-500/25 rounded px-1.5 py-0.5 leading-none"
+              title={`${marker.corroborationCount} independent feed(s) · score ${Math.round((marker.corroborationScore ?? 0) * 100)}%`}
+            >
+              ✓ {marker.corroborationCount} src
+            </span>
+          )}
+        </div>
+      ) : null}
 
       {/* Title */}
       <h3 className="text-lg font-bold leading-tight text-white pr-4">
-        {marker.title}
+        {cleanEventText(marker.title)}
       </h3>
 
       {/* Source + Time */}
@@ -121,7 +117,7 @@ export default function NewsContent({ marker, onClose }) {
       {/* Description */}
       {marker.description && (
         <p className="text-sm text-slate-300 leading-relaxed line-clamp-3">
-          {marker.description}
+          {cleanEventText(marker.description)}
         </p>
       )}
 
@@ -230,10 +226,7 @@ export default function NewsContent({ marker, onClose }) {
             key={i}
             className="h-1 flex-1 rounded-full shadow-sm"
             style={{
-              backgroundColor:
-                i < marker.importance
-                  ? CATEGORIES[marker.category]?.color || '#3b82f6'
-                  : '#1e293b',
+              backgroundColor: i < marker.importance ? '#3b82f6' : '#1e293b',
             }}
           />
         ))}

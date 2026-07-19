@@ -18,6 +18,7 @@ export const MODULES = {
   NUCLEAR: 'nuclear',
   ENVIRONMENT: 'environment',
   SENTIMENT: 'sentiment',
+  CAMERA: 'camera',
 }
 
 export const SOURCE_CATALOG = {
@@ -47,6 +48,7 @@ export const SOURCE_CATALOG = {
   opensky:          { name: 'OpenSky ADS-B',           module: MODULES.FLIGHT,        dimension: DIMENSIONS.NARRATIVE,    authoritative: false, requiresKey: false,  pollInterval: 10_000 },
   'celestrak-tle':  { name: 'CelesTrak Satellites',    module: MODULES.SPACE,         dimension: DIMENSIONS.ENVIRONMENT,  authoritative: false, requiresKey: false,  pollInterval: 3_600_000 },
   aisstream:        { name: 'AISStream Vessels',       module: MODULES.MARITIME,      dimension: DIMENSIONS.ECONOMY,      authoritative: false, requiresKey: true,   pollInterval: 20_000 },
+  cameras:          { name: 'Live Cameras',            module: MODULES.CAMERA,        dimension: DIMENSIONS.NARRATIVE,    authoritative: false, requiresKey: false,  pollInterval: 300_000, apiKeyHelpUrl: 'https://api.windy.com/webcams/pricing' },
   'noaa-nhc':       { name: 'NOAA NHC Hurricanes',     module: MODULES.WEATHER,       dimension: DIMENSIONS.ENVIRONMENT,  authoritative: true,  requiresKey: false,  pollInterval: 300_000 },
 }
 

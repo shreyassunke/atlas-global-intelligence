@@ -221,7 +221,6 @@ function recomputeOpacity(existing, corrobCount) {
  * Mutates `existing` and returns it.
  */
 export function mergeCrossSource(existing, incoming, opts = {}) {
-  const onPriorityUpgrade = opts.onPriorityUpgrade
 
   const sources = new Set(existing.corroborationSources || [])
   for (const s of incoming.corroborationSources || []) sources.add(s)
@@ -251,12 +250,7 @@ export function mergeCrossSource(existing, incoming, opts = {}) {
     existing.disputed = true
     existing.severity = Math.min(existing.severity || 1, incoming.severity || 1)
   } else if ((incoming.severity || 1) > (existing.severity || 1)) {
-    const oldPriority = existing.priority
     existing.severity = incoming.severity
-    existing.priority = incoming.priority || existing.priority
-    if (typeof onPriorityUpgrade === 'function' && oldPriority !== existing.priority) {
-      onPriorityUpgrade(existing, oldPriority)
-    }
   }
 
   const toneDis = detectToneDisagreement(existing.sourceReports)

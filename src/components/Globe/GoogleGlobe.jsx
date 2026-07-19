@@ -34,7 +34,11 @@ import {
   useGlobeViewModels,
   applyMarkerClick,
   applyMarkerHover,
+  applyCursorCoords,
+  clearCursorCoords,
   applyGlobeMapClick,
+  applyGlobeMapContextMenu,
+  approxLatLngUnderPointer,
   resolveFlyToTarget,
   geoJsonToOuterRings,
 } from '../../globe-core'
@@ -399,12 +403,57 @@ function InnerMap({ onGlobeReady }) {
       applyGlobeMapClick({
         lat: ll.lat,
         lng: ll.lng,
-        choroplethRows: choropleth,
         streetViewMode,
       })
     },
-    [choropleth, streetViewMode],
+    [streetViewMode],
   )
+
+  // Right-click country context menu (Map3D has no lat/lng pick on contextmenu).
+  // Capture phase so Marker3D / Map3D cannot swallow the event.
+  useEffect(() => {
+    const wrap = globeWrapRef.current
+    if (!wrap) return undefined
+
+    const onContextMenu = (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      if (useAtlasStore.getState().isStreetViewOpen) return
+
+      const cam = cameraRef.current
+      const center = literalLatLng(cam.center) || literalLatLng(map3dRef.current?.map3d?.center)
+      const rect = wrap.getBoundingClientRect()
+      const approx = approxLatLngUnderPointer({
+        centerLat: center?.lat,
+        centerLng: center?.lng,
+        rangeM: cam.range ?? STARTUP_ORBIT_RANGE_M,
+        headingDeg: cam.heading ?? 0,
+        tiltDeg: cam.tilt ?? 0,
+        clientX: e.clientX - rect.left,
+        clientY: e.clientY - rect.top,
+        viewportWidth: rect.width,
+        viewportHeight: rect.height,
+      })
+      // Fall back to last hover pick when the ray misses (limb / transient cam).
+      const coords = approx || useAtlasStore.getState().cursorCoords
+      if (!coords || !Number.isFinite(coords.lat) || !Number.isFinite(coords.lng)) {
+        useAtlasStore.getState().closeCountryContextMenu()
+        return
+      }
+      applyGlobeMapContextMenu({
+        lat: coords.lat,
+        lng: coords.lng,
+        screenX: e.clientX,
+        screenY: e.clientY,
+        choroplethRows: choropleth,
+      })
+    }
+
+    wrap.addEventListener('contextmenu', onContextMenu, true)
+    return () => wrap.removeEventListener('contextmenu', onContextMenu, true)
+  }, [choropleth])
+
+  useEffect(() => () => clearCursorCoords(), [])
 
   const onEventClick = useCallback(
     (e, evt) => {
@@ -669,7 +718,7 @@ function InnerMap({ onGlobeReady }) {
   )
 
   useEffect(() => {
-    const t = setTimeout(() => finalizeReady(), 5000)
+    const t = setTimeout(() => finalizeReady(), 1500)
     return () => clearTimeout(t)
   }, [finalizeReady])
 
@@ -746,7 +795,7 @@ function InnerMap({ onGlobeReady }) {
       tabIndex={-1}
       aria-label="3D globe"
       className={`fixed inset-0 z-0 outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/30 focus-visible:ring-offset-2 focus-visible:ring-offset-black/40${tacticalMode ? ' atlas-tactical-mode' : ''}`}
-      style={{ cursor: streetViewMode ? 'crosshair' : 'grab', touchAction: 'none' }}
+      style={{ cursor: streetViewMode ? 'crosshair' : 'grab', touchAction: 'none', background: '#030712' }}
       onPointerDown={(e) => {
         activePointersRef.current += 1
         userGesturingRef.current = true
@@ -782,8 +831,33 @@ function InnerMap({ onGlobeReady }) {
       }}
       onPointerMove={(e) => {
         lastPointerRef.current = { x: e.clientX, y: e.clientY }
+        const cam = cameraRef.current
+        const center = literalLatLng(cam.center) || literalLatLng(map3dRef.current?.map3d?.center)
+        const rect = e.currentTarget.getBoundingClientRect()
+        const approx = approxLatLngUnderPointer({
+          centerLat: center?.lat,
+          centerLng: center?.lng,
+          rangeM: cam.range ?? STARTUP_ORBIT_RANGE_M,
+          headingDeg: cam.heading ?? 0,
+          tiltDeg: cam.tilt ?? 0,
+          clientX: e.clientX - rect.left,
+          clientY: e.clientY - rect.top,
+          viewportWidth: rect.width,
+          viewportHeight: rect.height,
+        })
+        if (approx) applyCursorCoords(approx.lat, approx.lng)
+        else clearCursorCoords()
       }}
+      onPointerLeave={() => clearCursorCoords()}
     >
+      {!globeMapReady && (
+        <div className="atlas-globe-loading-backdrop absolute inset-0 z-[2]" aria-hidden />
+      )}
+      <div
+        className="atlas-globe-map-stage"
+        style={{ opacity: globeMapReady ? 1 : 0 }}
+        aria-hidden={!globeMapReady}
+      >
       <Map3D
         ref={map3dRef}
         mode={MapMode.HYBRID}
@@ -881,10 +955,8 @@ function InnerMap({ onGlobeReady }) {
           <Polyline3D
             key="solar-terminator"
             coordinates={terminatorRing}
-            strokeColor="rgba(100, 220, 255, 0.72)"
-            strokeWidth={2}
-            outerColor="rgba(100, 220, 255, 0.12)"
-            outerWidth={0.8}
+            strokeColor="rgba(148, 163, 184, 0.55)"
+            strokeWidth={1.5}
           />
         )}
 
@@ -1182,6 +1254,7 @@ function InnerMap({ onGlobeReady }) {
           )
         })}
       </Map3D>
+      </div>
     </div>
   )
 }

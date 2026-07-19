@@ -1,19 +1,124 @@
 export const NUCLEAR_FACILITIES = [
-  { name: 'Zaporizhzhia', lat: 47.51, lng: 34.59, country: 'UA' },
-  { name: 'Fukushima Daiichi', lat: 37.42, lng: 141.03, country: 'JP' },
-  { name: 'Chernobyl', lat: 51.39, lng: 30.10, country: 'UA' },
-  { name: 'Sellafield', lat: 54.42, lng: -3.50, country: 'GB' },
-  { name: 'La Hague', lat: 49.68, lng: -1.88, country: 'FR' },
-  { name: 'Hanford', lat: 46.55, lng: -119.49, country: 'US' },
-  { name: 'Natanz', lat: 33.72, lng: 51.73, country: 'IR' },
-  { name: 'Yongbyon', lat: 39.80, lng: 125.75, country: 'KP' },
-  { name: 'Dimona', lat: 31.00, lng: 35.15, country: 'IL' },
-  { name: 'Bushehr', lat: 28.83, lng: 50.89, country: 'IR' },
-  { name: 'Koodankulam', lat: 8.17, lng: 77.71, country: 'IN' },
-  { name: 'Barakah', lat: 23.96, lng: 52.26, country: 'AE' },
-  { name: 'Hinkley Point C', lat: 51.21, lng: -3.13, country: 'GB' },
-  { name: 'Vogtle', lat: 33.14, lng: -81.76, country: 'US' },
-  { name: 'Taishan', lat: 21.92, lng: 112.98, country: 'CN' },
+  {
+    name: 'Zaporizhzhia',
+    lat: 47.51,
+    lng: 34.59,
+    country: 'UA',
+    description:
+      "Europe's largest nuclear power plant (six VVER-1000 reactors). Occupied since 2022 and largely offline — a primary nuclear-safety and conflict watchpoint.",
+  },
+  {
+    name: 'Fukushima Daiichi',
+    lat: 37.42,
+    lng: 141.03,
+    country: 'JP',
+    description:
+      'Former commercial power plant site of the 2011 triple meltdown. Now a multi-decade decommissioning, spent-fuel, and contaminated-water management site.',
+  },
+  {
+    name: 'Chernobyl',
+    lat: 51.39,
+    lng: 30.10,
+    country: 'UA',
+    description:
+      'Site of the 1986 reactor disaster. Units shut down; Unit 4 remains under the New Safe Confinement while the complex undergoes long-term waste and decommissioning work.',
+  },
+  {
+    name: 'Sellafield',
+    lat: 54.42,
+    lng: -3.50,
+    country: 'GB',
+    description:
+      "UK's historic spent-fuel reprocessing and nuclear waste complex. Stores and treats high-level waste from decades of civil and defense nuclear activity.",
+  },
+  {
+    name: 'La Hague',
+    lat: 49.68,
+    lng: -1.88,
+    country: 'FR',
+    description:
+      "Orano's commercial spent-fuel reprocessing plant on the Cotentin Peninsula. Recovers uranium and plutonium from used nuclear fuel for reuse or storage.",
+  },
+  {
+    name: 'Hanford',
+    lat: 46.55,
+    lng: -119.49,
+    country: 'US',
+    description:
+      'Former U.S. plutonium-production site for nuclear weapons. Now the largest nuclear environmental cleanup project in the United States.',
+  },
+  {
+    name: 'Natanz',
+    lat: 33.72,
+    lng: 51.73,
+    country: 'IR',
+    description:
+      "Iran's primary uranium enrichment complex. Central to its nuclear fuel-cycle program and a long-standing focus of IAEA monitoring and sanctions pressure.",
+  },
+  {
+    name: 'Yongbyon',
+    lat: 39.80,
+    lng: 125.75,
+    country: 'KP',
+    description:
+      "North Korea's main nuclear research center. Historically linked to plutonium production, reprocessing, and weapons-related nuclear activity.",
+  },
+  {
+    name: 'Dimona',
+    lat: 31.00,
+    lng: 35.15,
+    country: 'IL',
+    description:
+      "Israel's Negev Nuclear Research Center. Widely assessed as the core of its undeclared nuclear weapons and related research program.",
+  },
+  {
+    name: 'Bushehr',
+    lat: 28.83,
+    lng: 50.89,
+    country: 'IR',
+    description:
+      "Iran's only operating commercial nuclear power plant (Russian-built VVER-1000) on the Persian Gulf, with additional units under construction.",
+  },
+  {
+    name: 'Koodankulam',
+    lat: 8.17,
+    lng: 77.71,
+    country: 'IN',
+    description:
+      "India's largest nuclear power station on the Tamil Nadu coast. Russian VVER units supplying grid power, with capacity expanding toward multi-gigawatt scale.",
+  },
+  {
+    name: 'Barakah',
+    lat: 23.96,
+    lng: 52.26,
+    country: 'AE',
+    description:
+      "UAE's first nuclear power plant — four APR-1400 reactors providing a large share of the country's clean baseload electricity.",
+  },
+  {
+    name: 'Hinkley Point C',
+    lat: 51.21,
+    lng: -3.13,
+    country: 'GB',
+    description:
+      "UK's first new nuclear station in decades. Twin EPR reactors under construction, planned to power around six million homes for 60 years.",
+  },
+  {
+    name: 'Vogtle',
+    lat: 33.14,
+    lng: -81.76,
+    country: 'US',
+    description:
+      'Largest U.S. nuclear power plant (~4.5 GW with four units). Includes the first new U.S. AP1000 reactors to enter commercial service in a generation.',
+  },
+  {
+    name: 'Taishan',
+    lat: 21.92,
+    lng: 112.98,
+    country: 'CN',
+    description:
+      'Chinese EPR nuclear power plant in Guangdong. Among the first EPR units worldwide to enter commercial operation, supplying baseload power to southern China.',
+  },
 ]
 
 
@@ -161,7 +266,6 @@ export function clusterEvents(events, radiusKm = 200, minClusterSize = 5) {
         centroid: { lat: sumLat / cluster.length, lng: sumLng / cluster.length },
         bounds: { minLat, maxLat, minLng, maxLng },
         dimension: evt.dimension,
-        priority: evt.priority,
         count: cluster.length,
         maxSeverity: Math.max(...cluster.map(e => e.severity)),
         events: cluster,
@@ -193,7 +297,6 @@ export function buildCorrelationArcs(anomalies, eventMap) {
           type: ARC_TYPES.CORRELATION,
           from: { lat: e1.lat, lng: e1.lng },
           to: { lat: e2.lat, lng: e2.lng },
-          priority: 'p1',
           label: `Chokepoint: ${anomaly.chokepoint}`,
         })
       }

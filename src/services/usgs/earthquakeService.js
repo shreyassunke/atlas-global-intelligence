@@ -24,13 +24,12 @@ export function parseUSGSGeoJSON(data) {
       if (isNaN(lat) || isNaN(lng) || isNaN(mag)) return null
 
       // Classify severity by magnitude
-      let priority = 'p3'
       let severity = 1
-      if (mag >= 7.0) { priority = 'p1'; severity = 5 }
-      else if (mag >= 6.0) { priority = 'p1'; severity = 4 }
-      else if (mag >= 5.5) { priority = 'p2'; severity = 3 }
-      else if (mag >= 5.0) { priority = 'p2'; severity = 2 }
-      else if (mag >= 4.0) { priority = 'p3'; severity = 1 }
+      if (mag >= 7.0) { severity = 5 }
+      else if (mag >= 6.0) { severity = 4 }
+      else if (mag >= 5.5) { severity = 3 }
+      else if (mag >= 5.0) { severity = 2 }
+      else if (mag >= 4.0) { severity = 1 }
       else return null // Skip below M4.0 for globe visibility
 
       // Depth classification

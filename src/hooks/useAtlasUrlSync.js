@@ -10,7 +10,6 @@ const CAMERA_DEBOUNCE_MS = 800
 function pickUrlSyncState(state) {
   return {
     activeDimensions: state.activeDimensions,
-    priorityFilter: state.priorityFilter,
     timeFilter: state.timeFilter,
     dataLayers: state.dataLayers,
     globeMode: state.globeMode,
@@ -49,7 +48,6 @@ export function useAtlasUrlSync(enabled = true) {
     const partial = deserializeAtlasUrlState(params, useAtlasStore.getState().dataLayers)
     const store = useAtlasStore.getState()
 
-    if (partial.priorityFilter) store.setPriorityFilter(partial.priorityFilter)
     if (partial.timeFilter) store.setTimeFilter(partial.timeFilter)
 
     if (partial.activeDimensions) {

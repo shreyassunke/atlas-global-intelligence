@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { useAtlasStore } from '../store/atlasStore'
+import { useAtlasStore, isLegacyCuratedSourceList } from '../store/atlasStore'
 import { supabase } from '../services/supabase'
 
 const DEBOUNCE_MS = 1000
@@ -11,7 +11,6 @@ function pickPreferences(state) {
     quality_tier: state.qualityTier,
     quality_overrides: state.qualityOverrides,
     colorblind_mode: state.colorblindMode,
-    priority_filter: state.priorityFilter,
     active_dimensions: [...state.activeDimensions],
   }
 }
@@ -36,7 +35,10 @@ export function usePreferencesSync() {
       if (cancelled || !data) return
 
       const store = useAtlasStore.getState()
-      if (data.selected_sources) store.setSelectedSources(data.selected_sources)
+      // Ignore legacy curated 7-source profiles — all sources are the default now.
+      if (data.selected_sources && !isLegacyCuratedSourceList(data.selected_sources)) {
+        store.setSelectedSources(data.selected_sources)
+      }
       if (data.globe_mode) store.setGlobeMode(data.globe_mode)
       if (data.quality_tier) store.setQualityTier(data.quality_tier)
       if (data.quality_overrides) {
@@ -46,10 +48,6 @@ export function usePreferencesSync() {
       }
       if (typeof data.colorblind_mode === 'boolean' && data.colorblind_mode !== store.colorblindMode) {
         store.toggleColorblindMode()
-      }
-      // Ignore remote `p1` — legacy default; would hide all GDELT dots on login
-      if (data.priority_filter && data.priority_filter !== 'p1') {
-        store.setPriorityFilter(data.priority_filter)
       }
       if (Array.isArray(data.active_dimensions)) {
         const currentDimensions = store.activeDimensions

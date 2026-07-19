@@ -20,9 +20,16 @@ export const colors = {
     governance: '#7F77DD',
     economy: '#EF9F27',
     people: '#1D9E75',
-    environment: '#888780',
+    environment: '#7CB342',
     narrative: '#378ADD',
   },
+  /* Geolocation precision tiers — the trust layer (SOURCE_GEOLOCATION_REFERENCE.md) */
+  tier: {
+    a: '#2fd08c',
+    b: '#ffaa00',
+    c: '#94a3b8',
+  },
+  derived: '#f0b429',
   report: {
     sitrep: '#1a365d',
     executive: '#c05621',
@@ -34,11 +41,11 @@ export const colors = {
 
 export const typography = {
   data: "'JetBrains Mono', monospace",
-  ui: "'Rajdhani', sans-serif",
-  hud: "'Courier Prime', 'JetBrains Mono', monospace",
+  ui: "'Inter', system-ui, sans-serif",
+  hud: "'JetBrains Mono', monospace",
   wordmark: "'Bebas Neue', sans-serif",
   reportSerif: "'Georgia', 'Times New Roman', serif",
-  reportMono: "'Courier New', monospace",
+  reportMono: "'JetBrains Mono', monospace",
 }
 
 export const spacing = {

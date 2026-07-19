@@ -72,6 +72,6 @@ function parseContextSentences(json) {
 export async function fetchContextSentences(query, opts = {}) {
   const { mode, timespan = '1440min', maxrecords = 25, signal } = opts
   const url = buildContextUrl(query, { mode, timespan, maxrecords })
-  const json = await fetchGdeltJson(url, { signal })
+  const json = await fetchGdeltJson(url, { signal, priority: 'interactive' })
   return parseContextSentences(json)
 }

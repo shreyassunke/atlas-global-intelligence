@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { DEFAULT_SOURCES, NEWS_SOURCES } from '../utils/newsSources'
+import { DEFAULT_SOURCES, NEWS_SOURCES, fetchAllSources } from '../utils/newsSources'
 import { CATEGORY_KEYS } from '../utils/categoryColors'
 import { loadQualitySettings, saveQualitySettings, loadGlobeMode, saveGlobeMode, QUALITY_TIERS } from '../config/qualityTiers'
 import {
@@ -21,8 +21,21 @@ import {
   saveInvestigationForWorkspace,
 } from '../core/investigationPersistence'
 import { eventToEvidence } from '../core/investigationSchema'
+import { eventToWorkspaceEventRow } from '../core/workspaceMatch'
 const STORAGE_KEY_SOURCES = 'atlas_selected_sources'
 const STORAGE_KEY_ONBOARDED = 'atlas_onboarded'
+/** One-time: expand legacy curated source lists to the full catalog default. */
+const STORAGE_KEY_SOURCES_MIGRATION = 'atlas_sources_migration'
+const SOURCES_MIGRATION_VERSION = 'all_v1'
+const LEGACY_DEFAULT_SOURCE_IDS = new Set([
+  'reuters',
+  'bbc-news',
+  'cnn',
+  'associated-press',
+  'al-jazeera-english',
+  'bloomberg',
+  'the-times-of-india',
+])
 const STORAGE_KEY_DATA_LAYERS = 'atlas_data_layers'
 const STORAGE_KEY_TACTICAL_MODE = 'atlas_tactical_mode'
 const STORAGE_KEY_DETECTION_MODE = 'atlas_detection_mode'
@@ -50,6 +63,7 @@ const DEFAULT_DATA_LAYERS = {
   adsbMilitary: true,    // Military ICAO hex sub-filter (distinct sprite; applies when adsb is on)
   satellites: false,     // CelesTrak TLE-propagated satellites
   ais: false,            // AISStream.io vessels at chokepoints (requires AISSTREAM_API_KEY server-side)
+  cameras: false,        // Public CCTV / webcams (Windy + TfL + Caltrans via /api/cameras)
   // ── basemap layers (imagery/context) ──
   gibsTrueColor: false,  // NASA GIBS MODIS true-color WMTS (2D Map + Globe.GL)
   gibsFires: false,      // MODIS 7-2-1 fire-sensitive false color
@@ -132,6 +146,17 @@ function persistBoolPref(key, value) {
   } catch { /* ignore */ }
 }
 
+function sourceIds(list) {
+  return list.map((s) => (typeof s === 'string' ? s : s?.id)).filter(Boolean)
+}
+
+/** True when the saved list is the old 7-source curated default (or a subset of it). */
+export function isLegacyCuratedSourceList(list) {
+  if (!Array.isArray(list) || list.length === 0) return true
+  if (list.length > LEGACY_DEFAULT_SOURCE_IDS.size) return false
+  return sourceIds(list).every((id) => LEGACY_DEFAULT_SOURCE_IDS.has(id))
+}
+
 function migrateSources(raw) {
   if (!Array.isArray(raw)) return DEFAULT_SOURCES
   if (raw.length === 0) return DEFAULT_SOURCES
@@ -152,9 +177,23 @@ function migrateSources(raw) {
 
 function loadSources() {
   try {
+    const migrated = localStorage.getItem(STORAGE_KEY_SOURCES_MIGRATION) === SOURCES_MIGRATION_VERSION
     const stored = localStorage.getItem(STORAGE_KEY_SOURCES)
-    if (!stored) return DEFAULT_SOURCES
-    return migrateSources(JSON.parse(stored))
+    if (!stored) {
+      localStorage.setItem(STORAGE_KEY_SOURCES_MIGRATION, SOURCES_MIGRATION_VERSION)
+      localStorage.setItem(STORAGE_KEY_SOURCES, JSON.stringify(DEFAULT_SOURCES))
+      return DEFAULT_SOURCES
+    }
+    const parsed = migrateSources(JSON.parse(stored))
+    if (!migrated && isLegacyCuratedSourceList(parsed)) {
+      localStorage.setItem(STORAGE_KEY_SOURCES_MIGRATION, SOURCES_MIGRATION_VERSION)
+      localStorage.setItem(STORAGE_KEY_SOURCES, JSON.stringify(DEFAULT_SOURCES))
+      return DEFAULT_SOURCES
+    }
+    if (!migrated) {
+      localStorage.setItem(STORAGE_KEY_SOURCES_MIGRATION, SOURCES_MIGRATION_VERSION)
+    }
+    return parsed
   } catch {
     return DEFAULT_SOURCES
   }
@@ -195,19 +234,8 @@ function loadActiveDimensions() {
 
 function loadFilters() {
   const params = new URLSearchParams(window.location.search)
-  // Legacy `p1` default hid GDELT (p2/p3). Without a URL override, always
-  // treat stored `p1` as `all` and persist so Supabase round-trips don't revive it.
-  const urlPri = params.get('pri')
-  let priority = urlPri || localStorage.getItem('atlas_priority_filter') || 'all'
-  if (!urlPri && priority === 'p1') {
-    priority = 'all'
-    try {
-      localStorage.setItem('atlas_priority_filter', 'all')
-    } catch { /* ignore */ }
-  }
   return {
-    priority,
-    time: params.get('time') || localStorage.getItem('atlas_time_filter') || 'live'
+    time: params.get('time') || localStorage.getItem('atlas_time_filter') || 'live',
   }
 }
 
@@ -226,6 +254,8 @@ export const useAtlasStore = create((set, get) => ({
   activeCategories: new Set(CATEGORY_KEYS),
   selectedMarker: null,
   hoveredMarker: null,
+  /** Live globe pointer position `{ lat, lng } | null` — drives mission-clock coords */
+  cursorCoords: null,
   activeRegion: 'global',
   isLoading: false,
   lastUpdated: null,
@@ -250,7 +280,7 @@ export const useAtlasStore = create((set, get) => ({
   // ── EventBus / Intel Events ──
   events: [],
   eventMap: {},
-  priorityCounts: { p1: 0, p2: 0, p3: 0 },
+  
   selectedEvent: null,
   /** `{ query, label?, dimension? }` — GDELT DOC analytics HUD; null when closed */
   gdeltAnalytics: null,
@@ -271,7 +301,6 @@ export const useAtlasStore = create((set, get) => ({
    * Drives the choropleth directly (no GEO API) and the Triage surge baseline.
    */
   gdeltCountryAggregates: null,
-  priorityFilter: filters.priority,
   timeFilter: filters.time,
   activeDimensions: loadActiveDimensions(),
   focusedEventId: null,
@@ -295,8 +324,6 @@ export const useAtlasStore = create((set, get) => ({
 
   // ── Auth / User ──
   user: null,
-  /** 'auth' | 'sources' — tracks which sub-step of onboarding the user is on */
-  onboardingStep: 'auth',
 
   // ── Investigation Workstation ──
   /** 'dashboard' | 'workstation' — auth users land on dashboard */
@@ -322,12 +349,19 @@ export const useAtlasStore = create((set, get) => ({
   // ── Phase 3 — UI shell: region model + panel coordinator ──
   /**
    * Single source of truth for the two work rails:
-   *   inspector — left rail, one slot: { type: 'event'|'news'|'place', payload } | null
+   *   inspector — left rail, one slot:
+   *     { type: 'event'|'news'|'place'|'economy'|'countryNews'|'weather', payload } | null
    *   workbench — right rail, tabbed: 'triage'|'dossier'|'analytics'|'layers'|'settings' | null
    * Opening one inspector content replaces the previous; Escape closes top-most
-   * (modal → workbench → inspector) via closeTopPanel().
+   * (modal → context menu → workbench → inspector) via closeTopPanel().
    */
   ui: { inspector: null, workbench: null, reportExportOpen: false },
+
+  /**
+   * Right-click country context menu.
+   * `{ x, y, lat, lng, country: { fips, iso, name, lat, lng } } | null`
+   */
+  countryContextMenu: null,
 
   // ── Quality & Globe Renderer ──
   /** 'cesium' | 'globegl' | 'leaflet' */
@@ -363,6 +397,7 @@ export const useAtlasStore = create((set, get) => ({
         ui: s.ui.inspector?.type === 'news' ? { ...s.ui, inspector: null } : s.ui,
       }),
   setHoveredMarker: (marker) => set({ hoveredMarker: marker }),
+  setCursorCoords: (coords) => set({ cursorCoords: coords }),
   setActiveRegion: (region) => set({ activeRegion: region }),
   setZoomLevel: (level) => set({ zoomLevel: level }),
   setIsLoading: (loading) => set({ isLoading: loading }),
@@ -410,12 +445,28 @@ export const useAtlasStore = create((set, get) => ({
 
   startLaunchTransition: () => set({ launchTransitionActive: true }),
   endLaunchTransition: () => set({ launchTransitionActive: false }),
-  setSkipCesiumIntro: (v) => set({ skipCesiumIntro: v }),
 
-  reopenOnboarding: () => {
-    set({ hasCompletedOnboarding: false })
-    localStorage.removeItem(STORAGE_KEY_ONBOARDED)
+  /** Select every catalog source and enter the globe. */
+  launchWithAllSources: async () => {
+    if (get().launchTransitionActive || get().hasCompletedOnboarding) return
+
+    // Start the transition immediately so the UI never sits on a deleted onboarding route.
+    set({ launchTransitionActive: true })
+    try {
+      localStorage.setItem(STORAGE_KEY_ONBOARDED, 'true')
+    } catch { /* ignore */ }
+
+    const apiKey = import.meta.env.VITE_NEWS_API_KEY
+    let catalog = get().sourceCatalog
+    if (catalog.length === 0) {
+      catalog = await fetchAllSources(apiKey)
+      set({ sourceCatalog: catalog })
+    }
+    const allSources = catalog.map((s) => ({ id: s.id, name: s.name, type: 'source' }))
+    localStorage.setItem(STORAGE_KEY_SOURCES, JSON.stringify(allSources))
+    set({ selectedSources: allSources })
   },
+  setSkipCesiumIntro: (v) => set({ skipCesiumIntro: v }),
 
   onResetView: null,
   setOnResetView: (fn) => set({ onResetView: fn }),
@@ -529,7 +580,7 @@ export const useAtlasStore = create((set, get) => ({
    * FIPS 10-4 (joins to gdeltCountryAggregates + BigQuery templates).
    */
   dossier: null,
-  /** Country selected by globe click — drives macro HUD without opening Workbench. */
+  /** Country selected via context menu / dossier entry — place-scoped investigation. */
   selectedPlace: null,
   setSelectedPlace: (place) => set({ selectedPlace: place || null }),
   /** Open the Dossier tab focused on a country (any entry point). */
@@ -551,6 +602,80 @@ export const useAtlasStore = create((set, get) => ({
   },
   clearDossier: () => set({ dossier: null, selectedPlace: null }),
 
+  openCountryContextMenu: (menu) => {
+    if (!menu?.country || (!menu.country.fips && !menu.country.name)) return
+    const x = Number(menu.x)
+    const y = Number(menu.y)
+    set({
+      countryContextMenu: {
+        x: Number.isFinite(x) ? x : (typeof window !== 'undefined' ? window.innerWidth / 2 : 0),
+        y: Number.isFinite(y) ? y : (typeof window !== 'undefined' ? window.innerHeight / 2 : 0),
+        lat: Number.isFinite(menu.lat) ? menu.lat : null,
+        lng: Number.isFinite(menu.lng) ? menu.lng : null,
+        country: {
+          fips: menu.country.fips || '',
+          iso: menu.country.iso || '',
+          name: menu.country.name || menu.country.iso || menu.country.fips || 'Unknown',
+          lat: Number.isFinite(menu.country.lat) ? menu.country.lat : null,
+          lng: Number.isFinite(menu.country.lng) ? menu.country.lng : null,
+        },
+        place: menu.place || null,
+        placeStatus: menu.place ? 'ready' : (menu.placeStatus || 'pending'),
+      },
+    })
+  },
+  /**
+   * Patch reverse-geocoded place onto an open context menu (same lat/lng).
+   * Ignores stale responses after the menu moved or closed.
+   */
+  updateCountryContextMenuPlace: (lat, lng, place) => {
+    set((s) => {
+      const menu = s.countryContextMenu
+      if (!menu) return s
+      if (menu.lat !== lat || menu.lng !== lng) return s
+      return {
+        countryContextMenu: {
+          ...menu,
+          place: place || null,
+          placeStatus: place ? 'ready' : 'miss',
+        },
+      }
+    })
+  },
+  closeCountryContextMenu: () => set({ countryContextMenu: null }),
+
+  /**
+   * Open inspector from country context menu actions.
+   * @param {'economy'|'countryNews'|'weather'} type
+   * @param {{ country, lat?, lng?, place? }} payload
+   */
+  openCountryInspect: (type, payload = {}) => {
+    if (!payload?.country || (!payload.country.fips && !payload.country.name)) return
+    const countryPlace = {
+      fips: payload.country.fips || '',
+      iso: payload.country.iso || '',
+      name: payload.country.name || payload.country.iso || payload.country.fips,
+      lat: Number.isFinite(payload.country.lat) ? payload.country.lat : null,
+      lng: Number.isFinite(payload.country.lng) ? payload.country.lng : null,
+    }
+    set((s) => ({
+      countryContextMenu: null,
+      selectedPlace: countryPlace,
+      ui: {
+        ...s.ui,
+        inspector: {
+          type,
+          payload: {
+            country: countryPlace,
+            place: payload.place || null,
+            lat: Number.isFinite(payload.lat) ? payload.lat : countryPlace.lat,
+            lng: Number.isFinite(payload.lng) ? payload.lng : countryPlace.lng,
+          },
+        },
+      },
+    }))
+  },
+
   // ── Panel coordinator actions ──
   openWorkbench: (tab) => set((s) => ({ ui: { ...s.ui, workbench: tab } })),
   closeWorkbench: () => set((s) => ({ ui: { ...s.ui, workbench: null, reportExportOpen: false } })),
@@ -567,7 +692,7 @@ export const useAtlasStore = create((set, get) => ({
     if (!s.dossier) {
       s.pushToast({
         label: 'Export',
-        message: 'Open a country dossier first — click a country on the tone map or search a place',
+        message: 'Open a country dossier first — right-click a country on the map',
       })
     }
   },
@@ -577,6 +702,24 @@ export const useAtlasStore = create((set, get) => ({
 
   closeInspector: () => set((s) => {
     const type = s.ui.inspector?.type
+    const payload = s.ui.inspector?.payload
+    const highlight = s.searchHighlight
+    // Restore the search card when closing a panel opened from that same place.
+    const fromSearchPlace =
+      (type === 'economy' || type === 'countryNews' || type === 'weather')
+      && highlight
+      && Number.isFinite(highlight.lat)
+      && Number.isFinite(highlight.lng)
+      && highlight.lat === payload?.lat
+      && highlight.lng === payload?.lng
+    if (fromSearchPlace) {
+      return {
+        ui: {
+          ...s.ui,
+          inspector: { type: 'place', payload: highlight },
+        },
+      }
+    }
     return {
       ui: { ...s.ui, inspector: null },
       ...(type === 'event' ? { selectedEvent: null } : {}),
@@ -587,7 +730,7 @@ export const useAtlasStore = create((set, get) => ({
 
   /**
    * Escape handler — closes the top-most open layer only.
-   * Order: modal (YouTube / Street View) → workbench → inspector.
+   * Order: modal (YouTube / Street View) → context menu → workbench → inspector.
    * Returns true when something was closed.
    */
   closeTopPanel: () => {
@@ -598,6 +741,10 @@ export const useAtlasStore = create((set, get) => ({
     }
     if (s.isStreetViewOpen) {
       set({ isStreetViewOpen: false })
+      return true
+    }
+    if (s.countryContextMenu) {
+      set({ countryContextMenu: null })
       return true
     }
     if (s.ui.workbench) {
@@ -687,7 +834,7 @@ export const useAtlasStore = create((set, get) => ({
             const pri = e.priority || e.priority || 'p3'
             if (counts[pri] !== undefined) counts[pri]++
           }
-          return { events: filtered, eventMap: nextMap, priorityCounts: counts }
+          return { events: filtered, eventMap: nextMap }
         }
 
         const counts = { p3: 0, p2: 0, p1: 0 }
@@ -700,7 +847,7 @@ export const useAtlasStore = create((set, get) => ({
           ? { anomalies: [...s.anomalies, ...diff.anomalies].slice(-100) }
           : {}
 
-        return { events: nextEvents, eventMap: nextMap, priorityCounts: counts, ...anomalyUpdates }
+        return { events: nextEvents, eventMap: nextMap, ...anomalyUpdates }
       })
     })
 
@@ -733,7 +880,7 @@ export const useAtlasStore = create((set, get) => ({
       eventBusReady: false,
       events: [],
       eventMap: {},
-      priorityCounts: { p1: 0, p2: 0, p3: 0 },
+      
       sourceStatuses: {},
       gdeltCountryAggregates: null,
     })
@@ -761,14 +908,7 @@ export const useAtlasStore = create((set, get) => ({
       ui: { ...s.ui, workbench: 'analytics' },
     }))
   },
-  closeGdeltAnalytics: () => set((s) => ({
-    gdeltAnalytics: null,
-    ui: s.ui.workbench === 'analytics' ? { ...s.ui, workbench: null } : s.ui,
-  })),
-  setPriorityFilter: (v) => {
-    localStorage.setItem('atlas_priority_filter', v)
-    set({ priorityFilter: v })
-  },
+  closeGdeltAnalytics: () => set({ gdeltAnalytics: null }),
   setTimeFilter: (v) => {
     localStorage.setItem('atlas_time_filter', v)
     set({ timeFilter: v })
@@ -867,7 +1007,6 @@ export const useAtlasStore = create((set, get) => ({
       appView: activeWorkspaceId ? 'workstation' : 'dashboard',
     })
   },
-  setOnboardingStep: (step) => set({ onboardingStep: step }),
 
   signOut: async () => {
     if (supabase) await supabase.auth.signOut()
@@ -927,10 +1066,8 @@ export const useAtlasStore = create((set, get) => ({
     persistDataLayers(layers)
     set({
       activeDimensions: dims,
-      priorityFilter: workspace.priority_filter || 'p1p2',
       dataLayers: layers,
     })
-    localStorage.setItem('atlas_priority_filter', workspace.priority_filter || 'p1p2')
     const bbox = workspace.focus_bbox
     if (bbox?.lat != null && bbox?.lng != null) {
       get().flyToLocation({
@@ -997,7 +1134,7 @@ export const useAtlasStore = create((set, get) => ({
       active_dimensions: payload.active_dimensions?.length
         ? payload.active_dimensions
         : [...DEFAULT_DIMENSIONS],
-      priority_filter: payload.priority_filter || 'p1p2',
+      priority_filter: 'all',
       data_layers: payload.data_layers || { ...DEFAULT_DATA_LAYERS },
       focus_bbox: focusBbox,
       status: 'monitoring',
@@ -1047,7 +1184,6 @@ export const useAtlasStore = create((set, get) => ({
       focus_regions: src.focus_regions,
       keywords: src.keywords,
       active_dimensions: src.active_dimensions,
-      priority_filter: src.priority_filter,
       data_layers: src.data_layers,
     })
   },
@@ -1093,7 +1229,21 @@ export const useAtlasStore = create((set, get) => ({
 
   addEventToCanvas: (event) => {
     if (!event) return false
-    return get().addEvidenceToCanvas(eventToEvidence(event))
+    const ok = get().addEvidenceToCanvas(eventToEvidence(event))
+    if (!ok) return false
+    // Pin = sole persistence path for live signals (canvas + optional workspace_events).
+    const { activeWorkspaceId, user, appendWorkspaceEvent } = get()
+    if (activeWorkspaceId && user && supabase) {
+      const row = eventToWorkspaceEventRow(activeWorkspaceId, event)
+      appendWorkspaceEvent(row)
+      supabase
+        .from('workspace_events')
+        .upsert(row, { onConflict: 'workspace_id,event_id' })
+        .then(({ error }) => {
+          if (error) console.warn('[pin persist]', error.message)
+        })
+    }
+    return true
   },
 
   removeEvidenceFromCanvas: (evidenceId) => {

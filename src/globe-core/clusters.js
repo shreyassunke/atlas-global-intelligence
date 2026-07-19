@@ -2,9 +2,8 @@
  * globe-core/clusters — spatial cluster view-models (hull + badge), shared
  * across renderers. Previously inlined in GoogleGlobe.
  */
-import { DIMENSION_COLORS } from '../core/eventSchema'
 import { clusterEvents, detectClusterToneDisagreement } from '../core/globeLayers'
-import { rgbaFromHex } from './viewModels'
+import { rgbaFromHex, SIGNAL_MARKER_COLOR } from './viewModels'
 
 /**
  * Hard cap on the clusterer input so the O(n²) pass stays bounded when the
@@ -45,7 +44,7 @@ export function buildClusterViewModels(events, {
   const clusters = clusterEvents(clusterInput, radiusKm, minClusterSize)
   return clusters
     .map((cluster) => {
-      const dimensionColor = DIMENSION_COLORS[cluster.dimension] || '#1a90ff'
+      const signalColor = SIGNAL_MARKER_COLOR
       const toneConflict = detectClusterToneDisagreement(cluster)
       const points = cluster.events.map((e) => [e.lng, e.lat])
       const hull = convexHull(points)
@@ -53,8 +52,8 @@ export function buildClusterViewModels(events, {
       return {
         key: `cl-${cluster.dimension}-${cluster.centroid.lat}-${cluster.centroid.lng}`,
         hullRing: hull.map(([lng, lat]) => ({ lat, lng })),
-        fill: rgbaFromHex(dimensionColor, toneConflict ? 0.16 : 0.12),
-        stroke: rgbaFromHex(toneConflict ? '#ffaa00' : dimensionColor, toneConflict ? 0.85 : 0.55),
+        fill: rgbaFromHex(signalColor, toneConflict ? 0.16 : 0.12),
+        stroke: rgbaFromHex(toneConflict ? '#ffaa00' : signalColor, toneConflict ? 0.85 : 0.55),
         count: cluster.count,
         centroid: cluster.centroid,
         dimension: cluster.dimension,

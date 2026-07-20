@@ -651,7 +651,7 @@ const NORMALIZERS = {
       seen.add(dedupeKey)
 
       let severity = 1
-      if (dimension === 'safety') { severity = 2; priority = 'p2' }
+      if (dimension === 'safety') severity = 2
       out.push(makeEvent({
         id: createEventId(lat, lng, tsMs, 'gdelt', title || url),
         dimension,
@@ -1681,7 +1681,7 @@ async function hydrateFromCache(sourceIds) {
 function startPollingSources(sourceIds) {
   const allConfigs = getAllConfigs()
   const prioritySet = new Set(PRIORITY_FETCH_SOURCES)
-  PRIORITY_FETCH_SOURCES.filter((id) => sourceIds.includes(id))
+  const priority = PRIORITY_FETCH_SOURCES.filter((id) => sourceIds.includes(id))
   const rest = sourceIds.filter((id) => !prioritySet.has(id))
 
   for (const id of priority) {
